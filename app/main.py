@@ -82,9 +82,6 @@ async def startup() -> None:
         raise DatabaseError("Connection pool not initialized")
     await apply_migrations(pool)
 
-    settings_reloader = SettingsReloader(database_client, on_contracts_changed)
-    await settings_reloader.reload()
-
     # Initialize Discord bot
     discord_bot = DiscordBot(settings.discord_token)
     await discord_bot.__aenter__()
@@ -92,8 +89,10 @@ async def startup() -> None:
 
     nft_poster = NFTPoster(discord_bot)
 
-    for chain in settings_reloader.current.tracked_contracts:
-        await start_chain_reader(chain)
+    # The first reload reports every tracked chain as changed, which starts its reader,
+    # so it runs only once everything a reader needs exists
+    settings_reloader = SettingsReloader(database_client, on_contracts_changed)
+    await settings_reloader.reload()
 
     logger.info("application.initialization.completed")
 

@@ -81,3 +81,53 @@ async def test_a_reader_started_later_that_fails_wakes_main() -> None:
     FakeReader.fail = True
     await main.on_contracts_changed("base-sepolia", frozenset({"0xa"}))
     await asyncio.wait_for(main.reader_ended.wait(), timeout=1)
+
+
+async def test_startup_starts_one_reader_per_tracked_chain(monkeypatch: pytest.MonkeyPatch) -> None:
+    class FakeDb:
+        pool = object()
+
+        async def __aenter__(self) -> "FakeDb":
+            return self
+
+    class FakeStore:
+        async def list_collections(self) -> list[Any]:
+            return [
+                SimpleNamespace(
+                    chain="base", contract_address="0xa", is_active=True, track_onchain=True
+                ),
+                SimpleNamespace(
+                    chain="base-sepolia", contract_address="0xb", is_active=True, track_onchain=True
+                ),
+            ]
+
+        async def list_company_wallets(self) -> list[Any]:
+            return []
+
+        async def list_marketplace_marks(self) -> list[Any]:
+            return []
+
+    class FakeBot:
+        def __init__(self, _token: str) -> None:
+            pass
+
+        async def __aenter__(self) -> "FakeBot":
+            return self
+
+    async def no_migrations(_pool: object) -> None:
+        return None
+
+    real_reloader = main.SettingsReloader
+    monkeypatch.setattr(main, "DatabaseClient", FakeDb)
+    monkeypatch.setattr(main, "apply_migrations", no_migrations)
+    monkeypatch.setattr(main, "SettingsReloader", lambda _db, cb: real_reloader(FakeStore(), cb))
+    monkeypatch.setattr(main, "DiscordBot", FakeBot)
+    monkeypatch.setattr(main, "NFTPoster", lambda _bot: SimpleNamespace())
+    monkeypatch.setattr(
+        main, "get_settings", lambda: SimpleNamespace(log_level="INFO", discord_token="t")
+    )
+
+    await main.startup()
+
+    assert sorted(r.chain for r in FakeReader.instances) == ["base", "base-sepolia"]
+    await stop_tasks()
