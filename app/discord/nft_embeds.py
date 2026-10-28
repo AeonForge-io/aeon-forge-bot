@@ -1,8 +1,9 @@
-"""Discord embed builders for NFT events."""
+"""Discord card builders for NFT events: one Components V2 message per event."""
 
 from decimal import Decimal
 
 import discord
+from discord import ui
 
 from app.discord.nft_event_colors import (
     BURN_COLOR,
@@ -44,6 +45,18 @@ def _get_explorer_url(chain: str, tx_hash: str) -> str:
     return f"{base_url}/tx/{tx_hash}"
 
 
+CHAIN_NAMES: dict[str, str] = {
+    "base": "Base",
+    "base-sepolia": "Base Sepolia",
+    "ethereum": "Ethereum",
+    "polygon": "Polygon",
+    "arbitrum": "Arbitrum",
+    "optimism": "Optimism",
+}
+
+# Forum One serves Base only (chain id 8453) among the chains this bot tracks
+FORUM_ONE_COLLECTION_URL = "https://forumone.io/collection/8453/{contract_address}"
+
 # Marketplace display name mapping
 MARKETPLACE_DISPLAY_NAMES: dict[str, str] = {
     "magic_eden": "Magic Eden",
@@ -62,20 +75,6 @@ def _format_marketplace(marketplace: str) -> str:
         Human-readable marketplace name (e.g., 'Magic Eden')
     """
     return MARKETPLACE_DISPLAY_NAMES.get(marketplace, marketplace.replace("_", " ").title())
-
-
-def _get_magic_eden_item_url(chain: str, contract_address: str, token_id: str) -> str:
-    """Get Magic Eden item detail URL.
-
-    Args:
-        chain: Blockchain network name
-        contract_address: NFT contract address
-        token_id: Token ID
-
-    Returns:
-        URL to item on Magic Eden
-    """
-    return f"https://magiceden.us/item-details/{chain}/{contract_address}/{token_id}"
 
 
 def _format_eth_price(price: Decimal | None, price_usd: Decimal | None = None) -> str:
@@ -121,272 +120,171 @@ def _format_floor_comparison(price: Decimal, floor: Decimal | None) -> str | Non
         return f"{pct:.0f}% below floor"
 
 
-def create_mint_embed(event: NFTMintEvent, collection_name: str) -> discord.Embed:
-    """Create Discord embed for mint event.
+def _link_button(label: str, url: str) -> ui.Button[ui.LayoutView]:
+    return ui.Button(style=discord.ButtonStyle.link, label=label, url=url)
+
+
+def _card(
+    colour: int,
+    sections: list[tuple[str, str, str | None, str]],
+    buttons: list[ui.Button[ui.LayoutView]],
+) -> ui.LayoutView:
+    """One container: per token a heading, its image and its detail lines, then the link buttons.
 
     Args:
-        event: Mint event data
-        collection_name: Human-readable collection name
-
-    Returns:
-        Discord embed ready to send
+        colour: Accent colour of the container
+        sections: (heading, subline, image URL, detail text) per token
+        buttons: Link buttons, in display order
     """
-    embed = discord.Embed(
-        title=f"🎨 New Mint | {collection_name} #{event.token_id}",
-        color=MINT_COLOR,
-        timestamp=event.event_timestamp,
-    )
+    container: ui.Container[ui.LayoutView] = ui.Container(accent_colour=colour)
+    for heading, subline, image_url, details in sections:
+        container.add_item(ui.TextDisplay(f"## {heading}\n-# {subline}"))
+        if image_url:
+            gallery: ui.MediaGallery[ui.LayoutView] = ui.MediaGallery()
+            gallery.add_item(media=image_url, description=heading)
+            container.add_item(gallery)
+        container.add_item(ui.TextDisplay(details))
+    if buttons:
+        container.add_item(ui.Separator())
+        container.add_item(ui.ActionRow(*buttons))
+    view = ui.LayoutView()
+    view.add_item(container)
+    return view
 
-    if event.token_image_url:
-        embed.set_image(url=event.token_image_url)
 
-    # Two-column layout
-    embed.add_field(
-        name="Minted By",
-        value=f"`{event.short_to_address}`",
-        inline=True,
-    )
+def _lines(*pairs: tuple[str, str | None]) -> str:
+    return "\n".join(f"**{label}** {value}" for label, value in pairs if value)
 
-    if event.progress_number is not None and event.max_supply is not None:
-        embed.add_field(
-            name="Progress",
-            value=f"#{event.progress_number} of {event.max_supply}",
-            inline=True,
+
+def _transaction_button(chain: str, tx_hash: str | None) -> list[ui.Button[ui.LayoutView]]:
+    return [_link_button("Transaction", _get_explorer_url(chain, tx_hash))] if tx_hash else []
+
+
+def _browse_button(chain: str, contract_address: str) -> list[ui.Button[ui.LayoutView]]:
+    if chain != "base":
+        return []
+    return [
+        _link_button(
+            "Browse Forum One", FORUM_ONE_COLLECTION_URL.format(contract_address=contract_address)
         )
-
-    if event.price_native is not None:
-        embed.add_field(
-            name="Price",
-            value=_format_eth_price(event.price_native, event.price_usd),
-            inline=True,
-        )
-
-    if event.transaction_hash:
-        explorer_url = _get_explorer_url(event.chain, event.transaction_hash)
-        embed.add_field(
-            name="Transaction",
-            value=f"[View on Explorer]({explorer_url})",
-            inline=False,
-        )
-
-    return embed
+    ]
 
 
-def create_transfer_embed(event: NFTTransferEvent, collection_name: str) -> discord.Embed:
-    """Create Discord embed for transfer event.
+def create_mint_card(
+    events: list[NFTMintEvent], collection_name: str, mint_url: str | None
+) -> ui.LayoutView:
+    """Create the card for one mint transaction (one message), a section per token.
 
     Args:
-        event: Transfer event data
+        events: Mint events of one transaction, in one message
         collection_name: Human-readable collection name
+        mint_url: Where to mint, or None for a collection that has no mint page
 
     Returns:
-        Discord embed ready to send
+        Layout view ready to send
     """
-    embed = discord.Embed(
-        title=f"🔄 Transfer | {collection_name} #{event.token_id}",
-        color=TRANSFER_COLOR,
-        timestamp=event.event_timestamp,
-    )
-
-    if event.token_image_url:
-        embed.set_image(url=event.token_image_url)
-
-    # Two-column layout
-    embed.add_field(
-        name="From",
-        value="Aeon Forge",
-        inline=True,
-    )
-
-    embed.add_field(
-        name="To",
-        value=f"`{event.short_to_address}`",
-        inline=True,
-    )
-
-    if event.transaction_hash:
-        explorer_url = _get_explorer_url(event.chain, event.transaction_hash)
-        embed.add_field(
-            name="Transaction",
-            value=f"[View on Explorer]({explorer_url})",
-            inline=False,
+    first = events[0]
+    sections = [
+        (
+            f"{collection_name} #{event.token_id}",
+            f"minted on {CHAIN_NAMES[event.chain]}",
+            event.token_image_url,
+            _lines(
+                ("Minter", event.short_to_address),
+                (
+                    "Price",
+                    _format_eth_price(event.price_native, event.price_usd)
+                    if event.price_native is not None
+                    else None,
+                ),
+                (
+                    "Progress",
+                    _progress_bar(event.progress_number, event.max_supply)
+                    if event.progress_number is not None and event.max_supply is not None
+                    else None,
+                ),
+            ),
         )
+        for event in events
+    ]
+    buttons = _transaction_button(first.chain, first.transaction_hash)
+    if mint_url:
+        buttons.append(_link_button("Mint yours", mint_url))
+    return _card(MINT_COLOR, sections, buttons)
 
-    return embed
+
+def _progress_bar(number: int, max_supply: int) -> str:
+    filled = min(10, round(10 * number / max_supply))
+    return "▰" * filled + "▱" * (10 - filled) + f" {number} / {max_supply}"
 
 
-def create_burn_embed(event: NFTBurnEvent, collection_name: str) -> discord.Embed:
-    """Create Discord embed for burn event.
-
-    Args:
-        event: Burn event data
-        collection_name: Human-readable collection name
-
-    Returns:
-        Discord embed ready to send
-    """
-    embed = discord.Embed(
-        title=f"🔥 Burned | {collection_name} #{event.token_id}",
-        color=BURN_COLOR,
-        timestamp=event.event_timestamp,
+def create_transfer_card(
+    event: NFTTransferEvent, collection_name: str, contract_address: str
+) -> ui.LayoutView:
+    """Create the card for a transfer sent from an Aeon Forge wallet."""
+    section = (
+        f"{collection_name} #{event.token_id}",
+        f"sent on {CHAIN_NAMES[event.chain]}",
+        event.token_image_url,
+        _lines(("From", "Aeon Forge"), ("To", event.short_to_address)),
     )
-
-    if event.token_image_url:
-        embed.set_image(url=event.token_image_url)
-
-    # Two-column layout
-    embed.add_field(
-        name="Burned By",
-        value=f"`{event.short_from_address}`",
-        inline=True,
+    buttons = _transaction_button(event.chain, event.transaction_hash) + _browse_button(
+        event.chain, contract_address
     )
-
-    if event.transaction_hash:
-        explorer_url = _get_explorer_url(event.chain, event.transaction_hash)
-        embed.add_field(
-            name="Transaction",
-            value=f"[View on Explorer]({explorer_url})",
-            inline=True,
-        )
-
-    return embed
+    return _card(TRANSFER_COLOR, [section], buttons)
 
 
-def create_listing_embed(
-    event: NFTListingEvent,
-    collection_name: str,
-    chain: str | None = None,
-    contract_address: str | None = None,
-) -> discord.Embed:
-    """Create Discord embed for listing event.
+def create_burn_card(
+    event: NFTBurnEvent, collection_name: str, contract_address: str
+) -> ui.LayoutView:
+    """Create the card for a burn."""
+    section = (
+        f"{collection_name} #{event.token_id}",
+        f"burned on {CHAIN_NAMES[event.chain]}",
+        event.token_image_url,
+        _lines(("Burned by", event.short_from_address)),
+    )
+    buttons = _transaction_button(event.chain, event.transaction_hash) + _browse_button(
+        event.chain, contract_address
+    )
+    return _card(BURN_COLOR, [section], buttons)
 
-    Args:
-        event: Listing event data
-        collection_name: Human-readable collection name
-        chain: Blockchain network (for Magic Eden link)
-        contract_address: NFT contract address (for Magic Eden link)
 
-    Returns:
-        Discord embed ready to send
-    """
-    # Use token name if available, otherwise collection + token ID
+def create_listing_card(
+    event: NFTListingEvent, collection_name: str, chain: str, contract_address: str
+) -> ui.LayoutView:
+    """Create the card for a marketplace listing (no transaction: listings are off-chain)."""
     title_name = event.token_name or f"{collection_name} #{event.token_id}"
-
-    embed = discord.Embed(
-        title=f"📋 Listed | {title_name}",
-        color=LISTING_COLOR,
-        timestamp=event.event_timestamp,
+    section = (
+        title_name,
+        f"listed on {CHAIN_NAMES[chain]}",
+        event.token_image_url,
+        _lines(
+            ("Seller", event.short_seller_address),
+            ("Price", _format_eth_price(event.price_native, event.price_usd)),
+            ("Marketplace", _format_marketplace(event.marketplace)),
+            ("Rarity", f"#{event.rarity_rank}" if event.rarity_rank else None),
+        ),
     )
-
-    # Image (Discord always places set_image at bottom)
-    if event.token_image_url:
-        embed.set_image(url=event.token_image_url)
-
-    # Row 1: Seller | Price
-    embed.add_field(
-        name="Seller",
-        value=f"`{event.short_seller_address}`",
-        inline=True,
-    )
-
-    embed.add_field(
-        name="Price",
-        value=_format_eth_price(event.price_native, event.price_usd),
-        inline=True,
-    )
-
-    # Row 2: Rarity | View on Marketplace
-    marketplace_name = _format_marketplace(event.marketplace)
-    if chain and contract_address:
-        me_url = _get_magic_eden_item_url(chain, contract_address, event.token_id)
-        marketplace_value = f"[View on {marketplace_name}]({me_url})"
-    else:
-        marketplace_value = marketplace_name
-
-    if event.rarity_rank:
-        embed.add_field(
-            name="Rarity",
-            value=f"#{event.rarity_rank}",
-            inline=False,  # Force new row
-        )
-        embed.add_field(
-            name="Preferred Marketplace",
-            value=marketplace_value,
-            inline=True,
-        )
-    else:
-        embed.add_field(
-            name="Preferred Marketplace",
-            value=marketplace_value,
-            inline=False,  # Full width when alone
-        )
-
-    return embed
+    return _card(LISTING_COLOR, [section], _browse_button(chain, contract_address))
 
 
-def create_sale_embed(
-    event: NFTSaleEvent,
-    collection_name: str,
-    chain: str | None = None,
-) -> discord.Embed:
-    """Create Discord embed for sale event.
-
-    Args:
-        event: Sale event data
-        collection_name: Human-readable collection name
-        chain: Blockchain network (for transaction link)
-
-    Returns:
-        Discord embed ready to send
-    """
-    # Use token name if available, otherwise collection + token ID
+def create_sale_card(
+    event: NFTSaleEvent, collection_name: str, chain: str, contract_address: str
+) -> ui.LayoutView:
+    """Create the card for a sale; sale_id is the transaction hash."""
     title_name = event.token_name or f"{collection_name} #{event.token_id}"
-
-    embed = discord.Embed(
-        title=f"💰 Sold | {title_name}",
-        color=SALE_COLOR,
-        timestamp=event.event_timestamp,
+    section = (
+        title_name,
+        f"sold on {CHAIN_NAMES[chain]}",
+        event.token_image_url,
+        _lines(
+            ("Seller", event.short_seller_address),
+            ("Buyer", event.short_buyer_address),
+            ("Price", _format_eth_price(event.price_native, event.price_usd)),
+            ("Marketplace", _format_marketplace(event.marketplace)),
+            ("Rarity", f"#{event.rarity_rank}" if event.rarity_rank else None),
+        ),
     )
-
-    # Image (Discord always places set_image at bottom)
-    if event.token_image_url:
-        embed.set_image(url=event.token_image_url)
-
-    # Row 1: Seller | Buyer
-    embed.add_field(
-        name="Seller",
-        value=f"`{event.short_seller_address}`",
-        inline=True,
-    )
-
-    embed.add_field(
-        name="Buyer",
-        value=f"`{event.short_buyer_address}`",
-        inline=True,
-    )
-
-    # Row 2: Price (full width for emphasis)
-    embed.add_field(
-        name="Price",
-        value=_format_eth_price(event.price_native, event.price_usd),
-        inline=False,
-    )
-
-    # Row 3: Rarity | Transaction
-    if event.rarity_rank:
-        embed.add_field(
-            name="Rarity",
-            value=f"#{event.rarity_rank}",
-            inline=True,
-        )
-
-    # Transaction link (sale_id is the transaction hash from Magic Eden)
-    if chain and event.sale_id:
-        explorer_url = _get_explorer_url(chain, event.sale_id)
-        embed.add_field(
-            name="Transaction",
-            value=f"[View on Explorer]({explorer_url})",
-            inline=True,
-        )
-
-    return embed
+    buttons = _transaction_button(chain, event.sale_id) + _browse_button(chain, contract_address)
+    return _card(SALE_COLOR, [section], buttons)

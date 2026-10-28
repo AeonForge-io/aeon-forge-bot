@@ -83,6 +83,9 @@ async def test_seed_rows(pg_client: DatabaseClient) -> None:
     assert (le.track_onchain, le.track_marketplace, le.marketplaces) == (True, True, ("forum_one",))
     assert (le.post_mints, le.post_burns, le.post_sales, le.post_listings) == (True,) * 4
     assert le.transfer_mode == "company"
+    assert le.mint_url == "https://aeonforge.io/mint"
+    assert collections["sepolia-test"].mint_url == "https://aeonforge.io/mint"
+    assert collections["dragonz-series-1"].mint_url is None
 
     test = collections["sepolia-test"]
     assert test.chain == "base-sepolia"

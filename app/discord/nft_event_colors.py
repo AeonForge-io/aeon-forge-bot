@@ -1,15 +1,17 @@
-"""Color constants for NFT event Discord embeds."""
+"""Accent colours for NFT event Discord cards."""
 
 # Discord color values (hex integers)
 
+# Aeon Forge website palette (af-website Tailwind theme)
+
 # On-chain events
-MINT_COLOR = 0x00FF00  # Green
-TRANSFER_COLOR = 0x3498DB  # Blue
-BURN_COLOR = 0xE67E22  # Orange
+MINT_COLOR = 0x00F3FF  # Brand cyan
+TRANSFER_COLOR = 0x00AAFF  # Brand blue
+BURN_COLOR = 0xB93931  # Red
 
 # Marketplace events
-LISTING_COLOR = 0x9B59B6  # Purple
-SALE_COLOR = 0xF1C40F  # Gold
+LISTING_COLOR = 0xBC13FE  # Purple
+SALE_COLOR = 0xFF4D00  # Orange
 
 # Collection colors by chain (for embed sidebar)
 CHAIN_COLORS = {

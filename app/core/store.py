@@ -60,6 +60,7 @@ class Collection:
     post_listings: bool = True
     transfer_mode: TransferMode = "company"
     image_url_template: str | None = None  # "{token_id}" is replaced by the token id
+    mint_url: str | None = None  # Where to mint; None gives mint posts no "Mint yours" button
 
 
 @dataclass(frozen=True)

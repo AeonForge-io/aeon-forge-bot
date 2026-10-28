@@ -19,6 +19,7 @@ from app.core.memory_store import MemoryStore
 from app.core.settings_reload import SettingsReloader
 from app.core.store import Collection, EventKind, PostStatus
 from app.discord.nft_poster import NFTPoster
+from app.discord.tests.card_view import Card
 from app.nft.models import ZERO_ADDRESS
 
 TEST_CHANNEL = 1215729486994210897
@@ -125,7 +126,7 @@ class FakeDiscord:
     """Stands in for DiscordBot: records every send, per channel."""
 
     def __init__(self, missing_channels: frozenset[int] = frozenset()) -> None:
-        self.sent: dict[int, list[list[discord.Embed]]] = {}
+        self.sent: dict[int, list[Card]] = {}
         self.missing_channels = missing_channels
         self.client = MagicMock(spec=discord.Client)
         self.client.get_channel.side_effect = self._channel
@@ -136,17 +137,13 @@ class FakeDiscord:
         channel = MagicMock(spec=discord.TextChannel)
 
         async def send(**kwargs: Any) -> None:
-            self.sent.setdefault(channel_id, []).append(kwargs["embeds"])
+            self.sent.setdefault(channel_id, []).append(Card(kwargs["view"]))
 
         channel.send = AsyncMock(side_effect=send)
         return channel
 
-    def messages(self, channel_id: int) -> list[list[discord.Embed]]:
+    def messages(self, channel_id: int) -> list[Card]:
         return self.sent.get(channel_id, [])
-
-
-def embed_field(embed: discord.Embed, name: str) -> str:
-    return str(next(f.value for f in embed.fields if f.name == name))
 
 
 def sepolia_collection(**overrides: Any) -> Collection:
