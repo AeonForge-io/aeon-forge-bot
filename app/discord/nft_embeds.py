@@ -1,4 +1,4 @@
-"""Discord card builders for NFT events: one Components V2 container per token."""
+"""Discord card builders for NFT events: one Components V2 message per event."""
 
 from decimal import Decimal
 
@@ -170,7 +170,7 @@ def _browse_button(chain: str, contract_address: str) -> list[ui.Button[ui.Layou
     ]
 
 
-def create_mint_embed(
+def create_mint_card(
     events: list[NFTMintEvent], collection_name: str, mint_url: str | None
 ) -> ui.LayoutView:
     """Create the card for one mint transaction (one message), a section per token.
@@ -187,7 +187,7 @@ def create_mint_embed(
     sections = [
         (
             f"{collection_name} #{event.token_id}",
-            f"minted on {CHAIN_NAMES.get(event.chain, event.chain)}",
+            f"minted on {CHAIN_NAMES[event.chain]}",
             event.token_image_url,
             _lines(
                 ("Minter", event.short_to_address),
@@ -218,13 +218,13 @@ def _progress_bar(number: int, max_supply: int) -> str:
     return "▰" * filled + "▱" * (10 - filled) + f" {number} / {max_supply}"
 
 
-def create_transfer_embed(
+def create_transfer_card(
     event: NFTTransferEvent, collection_name: str, contract_address: str
 ) -> ui.LayoutView:
     """Create the card for a transfer sent from an Aeon Forge wallet."""
     section = (
         f"{collection_name} #{event.token_id}",
-        f"sent on {CHAIN_NAMES.get(event.chain, event.chain)}",
+        f"sent on {CHAIN_NAMES[event.chain]}",
         event.token_image_url,
         _lines(("From", "Aeon Forge"), ("To", event.short_to_address)),
     )
@@ -234,13 +234,13 @@ def create_transfer_embed(
     return _card(TRANSFER_COLOR, [section], buttons)
 
 
-def create_burn_embed(
+def create_burn_card(
     event: NFTBurnEvent, collection_name: str, contract_address: str
 ) -> ui.LayoutView:
     """Create the card for a burn."""
     section = (
         f"{collection_name} #{event.token_id}",
-        f"burned on {CHAIN_NAMES.get(event.chain, event.chain)}",
+        f"burned on {CHAIN_NAMES[event.chain]}",
         event.token_image_url,
         _lines(("Burned by", event.short_from_address)),
     )
@@ -250,14 +250,14 @@ def create_burn_embed(
     return _card(BURN_COLOR, [section], buttons)
 
 
-def create_listing_embed(
+def create_listing_card(
     event: NFTListingEvent, collection_name: str, chain: str, contract_address: str
 ) -> ui.LayoutView:
     """Create the card for a marketplace listing (no transaction: listings are off-chain)."""
     title_name = event.token_name or f"{collection_name} #{event.token_id}"
     section = (
         title_name,
-        f"listed on {CHAIN_NAMES.get(chain, chain)}",
+        f"listed on {CHAIN_NAMES[chain]}",
         event.token_image_url,
         _lines(
             ("Seller", event.short_seller_address),
@@ -269,14 +269,14 @@ def create_listing_embed(
     return _card(LISTING_COLOR, [section], _browse_button(chain, contract_address))
 
 
-def create_sale_embed(
+def create_sale_card(
     event: NFTSaleEvent, collection_name: str, chain: str, contract_address: str
 ) -> ui.LayoutView:
     """Create the card for a sale; sale_id is the transaction hash."""
     title_name = event.token_name or f"{collection_name} #{event.token_id}"
     section = (
         title_name,
-        f"sold on {CHAIN_NAMES.get(chain, chain)}",
+        f"sold on {CHAIN_NAMES[chain]}",
         event.token_image_url,
         _lines(
             ("Seller", event.short_seller_address),

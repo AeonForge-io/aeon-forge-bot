@@ -4,11 +4,11 @@ from datetime import UTC, datetime
 from decimal import Decimal
 
 from app.discord.nft_embeds import (
-    create_burn_embed,
-    create_listing_embed,
-    create_mint_embed,
-    create_sale_embed,
-    create_transfer_embed,
+    create_burn_card,
+    create_listing_card,
+    create_mint_card,
+    create_sale_card,
+    create_transfer_card,
 )
 from app.discord.nft_event_colors import (
     BURN_COLOR,
@@ -51,7 +51,7 @@ def mint_event(nft_id: str = "42", **overrides: object) -> NFTMintEvent:
 
 
 async def test_mint_card_shows_image_token_progress_and_both_links() -> None:
-    card = Card(create_mint_embed([mint_event(price_native=Decimal("0.05"))], "DragonZ", MINT_URL))
+    card = Card(create_mint_card([mint_event(price_native=Decimal("0.05"))], "DragonZ", MINT_URL))
 
     assert card.accent == MINT_COLOR
     assert card.images == [IMAGE]
@@ -63,7 +63,7 @@ async def test_mint_card_shows_image_token_progress_and_both_links() -> None:
 
 
 async def test_mint_without_mint_url_has_no_mint_yours_button() -> None:
-    card = Card(create_mint_embed([mint_event()], "DragonZ", None))
+    card = Card(create_mint_card([mint_event()], "DragonZ", None))
 
     assert card.buttons == [("Transaction", TX_URL)]
 
@@ -73,7 +73,7 @@ async def test_batch_mint_lists_every_token_with_its_own_image_and_progress() ->
         mint_event("301", token_image_url="https://images.test/301.jpg", progress_number=210),
         mint_event("7", token_image_url="https://images.test/7.jpg", progress_number=211),
     ]
-    card = Card(create_mint_embed(events, "DragonZ", MINT_URL))
+    card = Card(create_mint_card(events, "DragonZ", MINT_URL))
 
     assert card.images == ["https://images.test/301.jpg", "https://images.test/7.jpg"]
     assert card.values("Progress") == ["▰▰▰▱▱▱▱▱▱▱ 210 / 750", "▰▰▰▱▱▱▱▱▱▱ 211 / 750"]
@@ -82,9 +82,27 @@ async def test_batch_mint_lists_every_token_with_its_own_image_and_progress() ->
 
 
 async def test_ten_token_mint_fits_the_40_component_limit() -> None:
-    card = Card(create_mint_embed([mint_event(str(i)) for i in range(10)], "DragonZ", MINT_URL))
+    events = [mint_event(str(i), price_native=Decimal("0.05")) for i in range(10)]
+    card = Card(create_mint_card(events, "DragonZ", MINT_URL))
 
+    # container + 10 x (text, gallery, text) + separator + action row + 2 buttons
+    assert len(card.items) == 35
     assert len(card.items) <= 40
+
+
+async def test_progress_bar_is_empty_at_zero_full_at_supply_and_clamped_beyond() -> None:
+    events = [
+        mint_event("1", progress_number=0),
+        mint_event("2", progress_number=750),
+        mint_event("3", progress_number=900),
+    ]
+    card = Card(create_mint_card(events, "DragonZ", MINT_URL))
+
+    assert card.values("Progress") == [
+        "▱▱▱▱▱▱▱▱▱▱ 0 / 750",
+        "▰▰▰▰▰▰▰▰▰▰ 750 / 750",
+        "▰▰▰▰▰▰▰▰▰▰ 900 / 750",
+    ]
 
 
 async def test_transfer_card_from_aeon_forge_has_browse_and_no_mint_button() -> None:
@@ -97,7 +115,7 @@ async def test_transfer_card_from_aeon_forge_has_browse_and_no_mint_button() -> 
         transaction_hash=TX_HASH,
         event_timestamp=NOW,
     )
-    card = Card(create_transfer_embed(event, "DragonZ", CONTRACT))
+    card = Card(create_transfer_card(event, "DragonZ", CONTRACT))
 
     assert card.accent == TRANSFER_COLOR
     assert card.images == [IMAGE]
@@ -115,7 +133,7 @@ async def test_burn_card() -> None:
         transaction_hash=TX_HASH,
         event_timestamp=NOW,
     )
-    card = Card(create_burn_embed(event, "DragonZ", CONTRACT))
+    card = Card(create_burn_card(event, "DragonZ", CONTRACT))
 
     assert card.accent == BURN_COLOR
     assert card.images == [IMAGE]
@@ -136,7 +154,7 @@ async def test_listing_card_has_only_browse_and_names_the_marketplace() -> None:
         listing_id="0xorder",
         event_timestamp=NOW,
     )
-    card = Card(create_listing_embed(event, "DragonZ", "base", CONTRACT))
+    card = Card(create_listing_card(event, "DragonZ", "base", CONTRACT))
 
     assert card.accent == LISTING_COLOR
     assert card.images == [IMAGE]
@@ -158,7 +176,7 @@ async def test_sale_card_for_another_marketplace_still_browses_forum_one() -> No
         sale_id=TX_HASH,
         event_timestamp=NOW,
     )
-    card = Card(create_sale_embed(event, "DragonZ", "base", CONTRACT))
+    card = Card(create_sale_card(event, "DragonZ", "base", CONTRACT))
 
     assert card.accent == SALE_COLOR
     assert card.images == [IMAGE]
@@ -176,7 +194,7 @@ async def test_test_chain_posts_have_no_forum_one_button() -> None:
         transaction_hash=TX_HASH,
         event_timestamp=NOW,
     )
-    card = Card(create_burn_embed(event, "Test", CONTRACT))
+    card = Card(create_burn_card(event, "Test", CONTRACT))
 
     assert [label for label, _ in card.buttons] == ["Transaction"]
     assert card.buttons[0][1] == f"https://sepolia.basescan.org/tx/{TX_HASH}"

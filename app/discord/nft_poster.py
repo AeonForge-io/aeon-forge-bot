@@ -6,11 +6,11 @@ import discord
 
 from app.core.logging import get_logger
 from app.discord.nft_embeds import (
-    create_burn_embed,
-    create_listing_embed,
-    create_mint_embed,
-    create_sale_embed,
-    create_transfer_embed,
+    create_burn_card,
+    create_listing_card,
+    create_mint_card,
+    create_sale_card,
+    create_transfer_card,
 )
 from app.nft.models import (
     NFTBurnEvent,
@@ -85,7 +85,7 @@ class NFTPoster:
         """
         try:
             channel = await self._get_channel(channel_id)
-            await channel.send(view=create_mint_embed(events, collection_name, mint_url))
+            await channel.send(view=create_mint_card(events, collection_name, mint_url))
 
             logger.info(
                 "nft.post.mint.success",
@@ -122,7 +122,7 @@ class NFTPoster:
         """
         try:
             channel = await self._get_channel(channel_id)
-            await channel.send(view=create_transfer_embed(event, collection_name, contract_address))
+            await channel.send(view=create_transfer_card(event, collection_name, contract_address))
 
             logger.info(
                 "nft.post.transfer.success",
@@ -159,7 +159,7 @@ class NFTPoster:
         """
         try:
             channel = await self._get_channel(channel_id)
-            await channel.send(view=create_burn_embed(event, collection_name, contract_address))
+            await channel.send(view=create_burn_card(event, collection_name, contract_address))
 
             logger.info(
                 "nft.post.burn.success",
@@ -199,7 +199,7 @@ class NFTPoster:
         try:
             channel = await self._get_channel(channel_id)
             await channel.send(
-                view=create_listing_embed(event, collection_name, chain, contract_address)
+                view=create_listing_card(event, collection_name, chain, contract_address)
             )
 
             logger.info(
@@ -241,7 +241,7 @@ class NFTPoster:
         try:
             channel = await self._get_channel(channel_id)
             await channel.send(
-                view=create_sale_embed(event, collection_name, chain, contract_address)
+                view=create_sale_card(event, collection_name, chain, contract_address)
             )
 
             logger.info(

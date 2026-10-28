@@ -1,237 +1,152 @@
-"""Post sample bot posts in the chosen design (Forge Card) to the test channel.
+"""Post sample bot posts to the test channel, built by the bot's own card builders.
 
 Usage: uv run python scripts/preview_designs.py [--type mint|batch|transfer|burn|listing|sale]
 
-Posts only to the test channel. Reads DISCORD_TOKEN from the main checkout's .env,
-so it runs from any worktree.
+Posts only to the test channel. Takes DISCORD_TOKEN from the environment, else from
+the nearest .env above this script (a worktree finds the main checkout's .env).
 """
 
 import argparse
 import asyncio
-from dataclasses import dataclass
+import os
+from datetime import UTC, datetime
+from decimal import Decimal
 from pathlib import Path
 
 import discord
 from discord import ui
 
+from app.core.config import Settings
+from app.discord.nft_embeds import (
+    create_burn_card,
+    create_listing_card,
+    create_mint_card,
+    create_sale_card,
+    create_transfer_card,
+)
+from app.nft.models import (
+    NFTBurnEvent,
+    NFTListingEvent,
+    NFTMintEvent,
+    NFTSaleEvent,
+    NFTTransferEvent,
+)
+
 TEST_CHANNEL_ID = 1215729486994210897
-ENV_FILE = Path("/mnt/volumes/projects/aeon-forge-bot/.env")
 
 MINT_URL = "https://aeonforge.io/mint"
-FORUM_ONE_COLLECTION_URL = "https://forumone.io/collection/8453/{contract}"
 SERIES_1_CONTRACT = "0xc7c1b8a5d8777dac959cb2b274debeda1c0ecc09"
 LIMITED_EDITION_CONTRACT = "0xa02fff7fe01eeb235cb65d501efc65c65d7ad509"
 SERIES_1_IMAGE = (
     "https://aeonforge.myfilebase.com/ipfs/QmbzChm6thk9y9DcooXKyxVfharxQ98ubPhsxSfFmg8eDW/{id}.jpg"
 )
 LIMITED_EDITION_IMAGE = "https://aeonforge.myfilebase.com/ipfs/bafybeihzuj42qllwqgnz4snidjexn5lbca6x6mvhu5qn7hzgcdwnqadr7q/{id}.jpg"
-TX_URL = (
-    "https://basescan.org/tx/0x9f2c61d4a7b35e08c1d94f6a2b7e83051c6d4ab9e2f7380d5c1a46b79e03d8ab"
-)
-
-# Website palette (af-website Tailwind theme)
-CYAN = 0x00F3FF
-BLUE = 0x00AAFF
-ORANGE = 0xFF4D00
-PURPLE = 0xBC13FE
-RED = 0xB93931
-
-TYPE_COLOURS = {
-    "mint": CYAN,
-    "batch": CYAN,
-    "sale": ORANGE,
-    "listing": PURPLE,
-    "transfer": BLUE,
-    "burn": RED,
-}
-TYPE_VERBS = {
-    "mint": "minted",
-    "batch": "minted",
-    "sale": "sold",
-    "listing": "listed",
-    "transfer": "sent",
-    "burn": "burned",
-}
+TX_HASH = "0x9f2c61d4a7b35e08c1d94f6a2b7e83051c6d4ab9e2f7380d5c1a46b79e03d8ab"
+MINTER = "0xab12345678901234567890123456789012345cd4"
+HOLDER = "0x7c03000000000000000000000000000000a9e1aa"
+BUYER = "0xb8f6000000000000000000000000000000002d5e"
+KINDS = ["mint", "batch", "transfer", "burn", "listing", "sale"]
 
 
-@dataclass
-class Sample:
-    kind: str
-    collection: str
-    image_template: str
-    token_ids: list[int]
-    progress: list[int]  # "#N" per token, mints only
-    max_supply: int
-    contract: str
-    minter: str = "0xab12…c4cd"
-    price: str | None = None
-    marketplace: str | None = None
-    sender: str | None = None
-    receiver: str | None = None
-
-    @property
-    def is_mint(self) -> bool:
-        return self.kind in ("mint", "batch")
-
-    def image(self, token_id: int) -> str:
-        return self.image_template.format(id=token_id)
-
-    def title(self, token_id: int) -> str:
-        return f"{self.collection} #{token_id}"
-
-    def bar(self, n: int) -> str:
-        filled = round(10 * n / self.max_supply)
-        return "▰" * filled + "▱" * (10 - filled) + f" {n} / {self.max_supply}"
-
-    def buttons(self) -> list[tuple[str, str]]:
-        """Transaction link on the left, the post's own link on the right."""
-        if self.is_mint:
-            return [("Transaction", TX_URL), ("Mint yours", MINT_URL)]
-        browse = FORUM_ONE_COLLECTION_URL.format(contract=self.contract)
-        return [("Transaction", TX_URL), ("Browse Forum One", browse)]
-
-    def detail_lines(self) -> list[tuple[str, str]]:
-        """(label, value) lines describing the event."""
-        n = self.progress[0] if self.progress else 0
-        if self.is_mint:
-            lines = [("Minter", self.minter)]
-            if self.price:
-                lines.append(("Price", self.price))
-            lines.append(("Progress", self.bar(n)))
-            return lines
-        if self.kind == "transfer":
-            return [("From", self.sender or ""), ("To", self.receiver or "")]
-        if self.kind == "burn":
-            return [("Burned by", self.sender or "")]
-        lines = [("Price", self.price or ""), ("Marketplace", self.marketplace or "")]
-        if self.kind == "sale":
-            lines += [("Seller", self.sender or ""), ("Buyer", self.receiver or "")]
-        else:
-            lines.append(("Seller", self.sender or ""))
-        return lines
+def _mint(token_id: int, progress: int) -> NFTMintEvent:
+    return NFTMintEvent(
+        collection_id=1,
+        token_id=str(token_id),
+        to_address=MINTER,
+        token_image_url=LIMITED_EDITION_IMAGE.format(id=token_id),
+        price_native=Decimal("0.0015"),
+        progress_number=progress,
+        max_supply=750,
+        transaction_hash=TX_HASH,
+        event_timestamp=datetime.now(UTC),
+    )
 
 
-def build_samples() -> dict[str, Sample]:
+def build_views() -> dict[str, ui.LayoutView]:
+    """One sample view per post type, from the production builders."""
+    now = datetime.now(UTC)
+    series_1 = "DragonZ Series 1"
+    image = SERIES_1_IMAGE.format(id=412)
     return {
-        "mint": Sample(
-            "mint",
+        "mint": create_mint_card([_mint(289, 212)], "DragonZ Limited Edition", MINT_URL),
+        "batch": create_mint_card(
+            [_mint(301, 210), _mint(302, 211), _mint(303, 212)],
             "DragonZ Limited Edition",
-            LIMITED_EDITION_IMAGE,
-            [289],
-            [212],
-            750,
-            LIMITED_EDITION_CONTRACT,
-            price="0.0015 ETH",
+            MINT_URL,
         ),
-        "batch": Sample(
-            "batch",
-            "DragonZ Limited Edition",
-            LIMITED_EDITION_IMAGE,
-            [301, 302, 303],
-            [210, 211, 212],
-            750,
-            LIMITED_EDITION_CONTRACT,
-            price="0.0015 ETH",
-        ),
-        "transfer": Sample(
-            "transfer",
-            "DragonZ Series 1",
-            SERIES_1_IMAGE,
-            [77],
-            [],
-            1122,
+        "transfer": create_transfer_card(
+            NFTTransferEvent(
+                collection_id=1,
+                token_id=str(77),
+                from_address=HOLDER,
+                to_address=BUYER,
+                token_image_url=SERIES_1_IMAGE.format(id=77),
+                transaction_hash=TX_HASH,
+                event_timestamp=now,
+            ),
+            series_1,
             SERIES_1_CONTRACT,
-            sender="Aeon Forge · Treasury",
-            receiver="0x5e9a…17f0",
         ),
-        "burn": Sample(
-            "burn",
-            "DragonZ Series 1",
-            SERIES_1_IMAGE,
-            [904],
-            [],
-            1122,
+        "burn": create_burn_card(
+            NFTBurnEvent(
+                collection_id=1,
+                token_id=str(904),
+                from_address=HOLDER,
+                token_image_url=SERIES_1_IMAGE.format(id=904),
+                transaction_hash=TX_HASH,
+                event_timestamp=now,
+            ),
+            series_1,
             SERIES_1_CONTRACT,
-            sender="0x31d4…88ae",
         ),
-        "listing": Sample(
-            "listing",
-            "DragonZ Series 1",
-            SERIES_1_IMAGE,
-            [412],
-            [],
-            1122,
+        "listing": create_listing_card(
+            NFTListingEvent(
+                collection_id=1,
+                token_id=str(412),
+                token_image_url=image,
+                seller_address=HOLDER,
+                marketplace="forum_one",
+                price_native=Decimal("0.045"),
+                listing_id="0xorderhash",
+                event_timestamp=now,
+            ),
+            series_1,
+            "base",
             SERIES_1_CONTRACT,
-            price="0.045 ETH",
-            marketplace="Forum One",
-            sender="0x7c03…a9e1",
         ),
-        "sale": Sample(
-            "sale",
-            "DragonZ Series 1",
-            SERIES_1_IMAGE,
-            [412],
-            [],
-            1122,
+        "sale": create_sale_card(
+            NFTSaleEvent(
+                collection_id=1,
+                token_id=str(412),
+                token_image_url=image,
+                seller_address=HOLDER,
+                buyer_address=BUYER,
+                marketplace="opensea",
+                price_native=Decimal("0.045"),
+                sale_id=TX_HASH,
+                transaction_hash=TX_HASH,
+                event_timestamp=now,
+            ),
+            series_1,
+            "base",
             SERIES_1_CONTRACT,
-            price="0.045 ETH",
-            marketplace="OpenSea",
-            sender="0x7c03…a9e1",
-            receiver="0xb8f6…02d5",
         ),
     }
 
 
-def _link_row(sample: Sample) -> ui.ActionRow[ui.LayoutView]:
-    return ui.ActionRow(
-        *[
-            ui.Button(style=discord.ButtonStyle.link, label=label, url=url)
-            for label, url in sample.buttons()
-        ]
-    )
-
-
-def forge_card(sample: Sample) -> list[ui.LayoutView]:
-    """Forge Card: one V2 container per token (tokens in a mint are not sequential)."""
-    views = []
-    for index, token_id in enumerate(sample.token_ids):
-        n = sample.progress[index] if sample.progress else 0
-        details = sample.detail_lines()
-        if sample.is_mint:
-            details = [
-                (label, sample.bar(n) if label == "Progress" else value) for label, value in details
-            ]
-        container: ui.Container[ui.LayoutView] = ui.Container(
-            accent_colour=TYPE_COLOURS[sample.kind]
-        )
-        container.add_item(
-            ui.TextDisplay(f"## {sample.title(token_id)}\n-# {TYPE_VERBS[sample.kind]} on Base")
-        )
-        gallery: ui.MediaGallery[ui.LayoutView] = ui.MediaGallery()
-        gallery.add_item(media=sample.image(token_id), description=sample.title(token_id))
-        container.add_item(gallery)
-        container.add_item(ui.Separator())
-        container.add_item(
-            ui.TextDisplay("\n".join(f"**{label}** {value}" for label, value in details))
-        )
-        container.add_item(ui.Separator())
-        container.add_item(_link_row(sample))
-        view = ui.LayoutView()
-        view.add_item(container)
-        views.append(view)
-    return views
-
-
 def read_token() -> str:
-    for line in ENV_FILE.read_text().splitlines():
-        key, _, value = line.partition("=")
-        if key.strip() == "DISCORD_TOKEN" and value.strip():
-            return value.strip().strip("\"'")
-    raise SystemExit(f"DISCORD_TOKEN is not set in {ENV_FILE}")
+    token = os.environ.get("DISCORD_TOKEN")
+    if token:
+        return token
+    for folder in Path(__file__).resolve().parents:
+        env_file = folder / ".env"
+        if env_file.is_file():
+            return Settings(_env_file=env_file).discord_token
+    raise SystemExit("Set DISCORD_TOKEN or provide a .env above this script")
 
 
 async def post(kinds: list[str]) -> None:
-    samples = build_samples()
+    views = build_views()
     client = discord.Client(intents=discord.Intents.none())
     await client.login(read_token())
     try:
@@ -239,18 +154,17 @@ async def post(kinds: list[str]) -> None:
         if not isinstance(channel, discord.abc.Messageable):
             raise SystemExit(f"Channel {TEST_CHANNEL_ID} cannot take messages")
         for kind in kinds:
-            await channel.send(f"**Variant B: Forge Card (round 3)** · {kind}")
-            for view in forge_card(samples[kind]):
-                await channel.send(view=view)
+            await channel.send(f"Sample {kind} post")
+            await channel.send(view=views[kind])
     finally:
         await client.close()
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--type", choices=list(TYPE_COLOURS), help="one post type (default all)")
+    parser.add_argument("--type", choices=KINDS, help="one post type (default all)")
     args = parser.parse_args()
-    asyncio.run(post([args.type] if args.type else list(TYPE_COLOURS)))
+    asyncio.run(post([args.type] if args.type else KINDS))
 
 
 if __name__ == "__main__":
