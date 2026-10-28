@@ -134,6 +134,6 @@ async def fetch_token_image(
             "metadata.fetch.error",
             contract=contract_address[:10],
             token_id=token_id,
-            error=str(e),
+            error_type=type(e).__name__,  # str(e) can carry the RPC URL with the key
         )
         return None

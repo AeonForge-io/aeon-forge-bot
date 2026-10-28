@@ -81,7 +81,7 @@ async def main() -> None:
     try:
         await startup()
 
-        # Idle until the chain reader and pollers are added
+        # No inbound port and nothing to poll yet: the process just stays alive
         while True:
             await asyncio.sleep(60)
 

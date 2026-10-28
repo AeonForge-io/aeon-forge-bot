@@ -4,7 +4,6 @@
 
 -- Drop tables in reverse order due to foreign key constraints
 DROP TABLE IF EXISTS nft_marketplace_state;
-DROP TABLE IF EXISTS nft_delistings;
 DROP TABLE IF EXISTS nft_sales;
 DROP TABLE IF EXISTS nft_listings;
 DROP TABLE IF EXISTS nft_burns;

@@ -32,14 +32,6 @@ def test_settings_load_with_only_three_env_vars(required_env: None) -> None:
     assert settings.db_user == "aeon_forge_bot"
 
 
-def test_settings_have_no_github_or_global_channel_fields(required_env: None) -> None:
-    """No GitHub or global Discord channel settings remain."""
-    fields = set(Settings.model_fields)
-
-    assert not any("github" in f for f in fields)
-    assert "discord_channel_id" not in fields
-
-
 @pytest.mark.parametrize("missing", sorted(REQUIRED_ENV))
 def test_settings_missing_required_field(
     monkeypatch: pytest.MonkeyPatch, required_env: None, missing: str

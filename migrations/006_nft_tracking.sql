@@ -128,26 +128,6 @@ CREATE INDEX IF NOT EXISTS idx_nft_sales_collection ON nft_sales(collection_id);
 CREATE INDEX IF NOT EXISTS idx_nft_sales_marketplace ON nft_sales(marketplace);
 CREATE INDEX IF NOT EXISTS idx_nft_sales_unposted ON nft_sales(posted_to_discord, created_at);
 
--- NFT Delistings (track when listings are cancelled)
-CREATE TABLE IF NOT EXISTS nft_delistings (
-    id SERIAL PRIMARY KEY,
-    collection_id INT REFERENCES nft_collections(id),
-    token_id TEXT NOT NULL,
-    token_name TEXT,
-    seller_address TEXT NOT NULL,
-    marketplace TEXT NOT NULL,
-    original_price_native NUMERIC,
-    delisting_id TEXT,
-    event_timestamp TIMESTAMP NOT NULL,
-    posted_to_discord BOOLEAN DEFAULT FALSE,
-    posted_at TIMESTAMP,
-    created_at TIMESTAMP DEFAULT NOW(),
-    UNIQUE(collection_id, marketplace, delisting_id)
-);
-
-CREATE INDEX IF NOT EXISTS idx_nft_delistings_collection ON nft_delistings(collection_id);
-CREATE INDEX IF NOT EXISTS idx_nft_delistings_unposted ON nft_delistings(posted_to_discord, created_at);
-
 -- Processing state for marketplace polling (per collection per marketplace)
 CREATE TABLE IF NOT EXISTS nft_marketplace_state (
     collection_id INT REFERENCES nft_collections(id),
