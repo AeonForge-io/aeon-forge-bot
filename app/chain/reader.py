@@ -1,0 +1,287 @@
+"""The chain reader: one per chain, turning ERC-721 mints into stored, posted events.
+
+The websocket subscription tells the reader that a block holds tracked Transfer logs; the
+logs themselves are read with eth_getLogs, the same way catch-up reads them. So a live block
+and a replayed block take one path, and the cursor moves only after a block's mints are stored.
+"""
+
+import asyncio
+from collections import defaultdict
+from collections.abc import Awaitable, Callable
+from datetime import UTC, datetime
+from decimal import Decimal
+from typing import Any
+
+from app.chain.rpc import Block, ChainConnectionError, ChainRpc, SubscriptionError, hex_to_int
+from app.core.logging import get_logger
+from app.core.settings_reload import SettingsReloader
+from app.core.store import Collection, EventKind, PostStatus, Store
+from app.discord.nft_poster import MAX_EMBEDS_PER_MESSAGE, NFTPoster
+from app.nft.models import ZERO_ADDRESS, NFTMintEvent
+from app.shared.exceptions import DiscordAPIError
+
+logger = get_logger(__name__)
+
+ERC721_TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
+TOTAL_SUPPLY_SELECTOR = "0x18160ddd"
+MAX_SUPPLY_SELECTOR = "0xd5abeb01"
+
+CATCH_UP_WINDOW_SECONDS = 6 * 60 * 60
+LOG_RANGE_BLOCKS = 2000
+WEI_PER_ETH = Decimal(10**18)
+
+BACKOFF_START_SECONDS = 1.0
+BACKOFF_MAX_SECONDS = 60.0
+
+# Chains that poll eth_getLogs when the websocket refuses the logs subscription
+POLLING_FALLBACK_CHAINS = frozenset({"base-sepolia"})
+POLL_INTERVAL_SECONDS = 30.0
+
+ImageLookup = Callable[[str, str, str], Awaitable[str | None]]
+
+
+class MintLog:
+    """A decoded ERC-721 Transfer from the zero address."""
+
+    def __init__(self, log: dict[str, Any]) -> None:
+        topics = log["topics"]
+        self.contract: str = log["address"].lower()
+        self.token_id = hex_to_int(topics[3])
+        self.minter = "0x" + topics[2][-40:]
+        self.tx_hash: str = log["transactionHash"]
+        self.log_index = hex_to_int(log["logIndex"])
+
+
+def mint_logs(logs: list[dict[str, Any]]) -> list[MintLog]:
+    """The ERC-721 mints among the logs (4 topics, sent from the zero address)."""
+    return [
+        MintLog(log)
+        for log in logs
+        if len(log["topics"]) == 4 and "0x" + log["topics"][1][-40:] == ZERO_ADDRESS
+    ]
+
+
+class ChainReader:
+    """Reads one chain's tracked contracts and posts their mints."""
+
+    def __init__(
+        self,
+        chain: str,
+        rpc: ChainRpc,
+        store: Store,
+        reloader: SettingsReloader,
+        poster: NFTPoster,
+        image_lookup: ImageLookup,
+        sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+    ) -> None:
+        self.chain = chain
+        self.rpc = rpc
+        self.store = store
+        self.reloader = reloader
+        self.poster = poster
+        self.image_lookup = image_lookup
+        self.sleep = sleep
+        self.contracts = reloader.current.tracked_contracts.get(chain, frozenset())
+        self._next_contracts: frozenset[str] | None = None
+        self._contracts_changed = asyncio.Event()
+
+    def replace_contracts(self, contracts: frozenset[str]) -> None:
+        """Track a new contract set; the subscription is replaced at the next safe point."""
+        self._next_contracts = contracts
+        self._contracts_changed.set()
+
+    # ---- Running ----
+
+    async def run(self) -> None:
+        """Read the chain forever: reconnect with backoff, poll if websocket logs fail."""
+        delay = BACKOFF_START_SECONDS
+        while True:
+            try:
+                await self.connect_once()
+                delay = BACKOFF_START_SECONDS
+            except SubscriptionError as e:
+                if self.chain not in POLLING_FALLBACK_CHAINS:
+                    raise
+                logger.warning("chain.subscription.refused", chain=self.chain, error=str(e))
+                await self._poll_forever()
+            except ChainConnectionError as e:
+                logger.warning("chain.connection.lost", chain=self.chain, error=str(e))
+                delay = min(delay * 2, BACKOFF_MAX_SECONDS)
+            if not self._contracts_changed.is_set():
+                await self.sleep(delay)
+
+    async def connect_once(self) -> None:
+        """Catch up, then follow the subscription until it ends or the contract set changes."""
+        await self._adopt_new_contracts()
+        await self.sync_to(await self.rpc.block())
+        live = asyncio.ensure_future(self._follow_subscription())
+        changed = asyncio.ensure_future(self._contracts_changed.wait())
+        try:
+            await asyncio.wait({live, changed}, return_when=asyncio.FIRST_COMPLETED)
+        finally:
+            live.cancel()
+            changed.cancel()
+            await asyncio.gather(live, changed, return_exceptions=True)
+        if live.done() and not live.cancelled():
+            live.result()
+
+    async def _follow_subscription(self) -> None:
+        log_filter = {"address": sorted(self.contracts), "topics": [ERC721_TRANSFER_TOPIC]}
+        async for log in self.rpc.transport.subscribe_logs(log_filter):
+            if log.get("removed"):
+                logger.info("chain.log.removed", chain=self.chain, tx=log["transactionHash"])
+                continue
+            await self.sync_to(await self.rpc.block(hex_to_int(log["blockNumber"])))
+
+    async def _poll_forever(self) -> None:
+        while True:
+            await self._adopt_new_contracts()
+            await self.sync_to(await self.rpc.block())
+            await self.sleep(POLL_INTERVAL_SECONDS)
+
+    async def _adopt_new_contracts(self) -> None:
+        """Switch to the new contract set, after reading what the old set owes up to the head.
+
+        A collection added later is therefore tracked from the current block onward.
+        """
+        if self._next_contracts is None:
+            return
+        await self.sync_to(await self.rpc.block())
+        self.contracts = self._next_contracts
+        self._next_contracts = None
+        self._contracts_changed.clear()
+
+    # ---- Catch-up and cursor ----
+
+    async def sync_to(self, head: Block) -> None:
+        """Store and post the mints between the cursor and the head, then move the cursor."""
+        cursor = await self.store.get_cursor(self.chain)
+        if cursor is None:
+            await self._save_cursor(head)
+            logger.info("chain.cursor.started", chain=self.chain, block=head.number)
+            return
+        if head.number <= cursor.last_block:
+            return
+        start = cursor.last_block + 1
+        cutoff = head.timestamp - CATCH_UP_WINDOW_SECONDS
+        if cursor.last_block_time is None or cursor.last_block_time.timestamp() < cutoff:
+            start = await self._first_block_since(cutoff, start, head.number)
+            logger.warning(
+                "chain.catchup.gap_skipped",
+                chain=self.chain,
+                cursor_block=cursor.last_block,
+                resumed_at=start,
+            )
+        if not self.contracts:
+            await self._save_cursor(head)
+            return
+        for low in range(start, head.number + 1, LOG_RANGE_BLOCKS):
+            high = min(low + LOG_RANGE_BLOCKS - 1, head.number)
+            logs = await self.rpc.logs(low, high, sorted(self.contracts), [ERC721_TRANSFER_TOPIC])
+            by_block: dict[int, list[dict[str, Any]]] = defaultdict(list)
+            for log in logs:
+                if log.get("removed"):
+                    continue
+                by_block[hex_to_int(log["blockNumber"])].append(log)
+            for number in sorted(by_block):
+                block = await self.rpc.block(number)
+                await self._store_block_mints(block, by_block[number])
+                await self._save_cursor(block)
+        await self._save_cursor(head)
+
+    async def _first_block_since(self, cutoff: int, low: int, high: int) -> int:
+        """The first block in [low, high] whose time is at or after the cutoff."""
+        while low < high:
+            middle = (low + high) // 2
+            if (await self.rpc.block(middle)).timestamp >= cutoff:
+                high = middle
+            else:
+                low = middle + 1
+        return low
+
+    async def _save_cursor(self, block: Block) -> None:
+        await self.store.set_cursor(
+            self.chain, block.number, datetime.fromtimestamp(block.timestamp, UTC)
+        )
+
+    # ---- Mints ----
+
+    async def _store_block_mints(self, block: Block, logs: list[dict[str, Any]]) -> None:
+        by_contract: dict[str, list[MintLog]] = defaultdict(list)
+        for mint in sorted(mint_logs(logs), key=lambda m: m.log_index):
+            by_contract[mint.contract].append(mint)
+        for contract, mints in by_contract.items():
+            collection = self._collection(contract)
+            if collection is not None:
+                await self._store_contract_mints(block, collection, mints)
+
+    def _collection(self, contract: str) -> Collection | None:
+        for collection in self.reloader.current.collections:
+            if (
+                collection.chain == self.chain
+                and collection.contract_address == contract
+                and collection.is_active
+                and collection.track_onchain
+            ):
+                return collection
+        return None
+
+    async def _store_contract_mints(
+        self, block: Block, collection: Collection, mints: list[MintLog]
+    ) -> None:
+        """Record a contract's mints in one block; post the new ones, one message per 10."""
+        supply = await self.rpc.call_uint(
+            collection.contract_address, TOTAL_SUPPLY_SELECTOR, block.number
+        )
+        max_supply = await self.rpc.call_uint(
+            collection.contract_address, MAX_SUPPLY_SELECTOR, block.number
+        )
+        minted_per_tx: dict[str, int] = defaultdict(int)
+        for mint in mints:
+            minted_per_tx[mint.tx_hash] += 1
+        price_per_token: dict[str, Decimal | None] = {}
+        for tx_hash, count in minted_per_tx.items():
+            value = Decimal(await self.rpc.transaction_value_wei(tx_hash)) / WEI_PER_ETH
+            price_per_token[tx_hash] = value / count if value > 0 else None
+
+        status = PostStatus.PENDING if collection.post_mints else PostStatus.SKIPPED
+        new_per_tx: dict[str, list[tuple[int, NFTMintEvent]]] = defaultdict(list)
+        for position, mint in enumerate(mints):
+            later_mints = len(mints) - 1 - position
+            event = NFTMintEvent(
+                collection_id=collection.id,
+                token_id=str(mint.token_id),
+                to_address=mint.minter,
+                chain=self.chain,
+                token_image_url=await self.image_lookup(
+                    collection.contract_address, str(mint.token_id), self.chain
+                ),
+                price_native=price_per_token[mint.tx_hash],
+                progress_number=supply - later_mints,
+                max_supply=max_supply,
+                transaction_hash=mint.tx_hash,
+                block_number=block.number,
+                event_timestamp=datetime.fromtimestamp(block.timestamp, UTC),
+            )
+            event_id = await self.store.insert_mint(event, status)
+            if event_id is not None and status is PostStatus.PENDING:
+                new_per_tx[mint.tx_hash].append((event_id, event))
+        for recorded in new_per_tx.values():
+            for first in range(0, len(recorded), MAX_EMBEDS_PER_MESSAGE):
+                await self._post_mints(collection, recorded[first : first + MAX_EMBEDS_PER_MESSAGE])
+
+    async def _post_mints(
+        self, collection: Collection, recorded: list[tuple[int, NFTMintEvent]]
+    ) -> None:
+        try:
+            await self.poster.post_mints(
+                [event for _, event in recorded], collection.name, collection.discord_channel_id
+            )
+        except DiscordAPIError as e:
+            # Stays pending; the retry loop (a later card) picks it up
+            logger.error(
+                "chain.mint.post_failed", collection=collection.collection_id, error=str(e)
+            )
+            return
+        for event_id, _ in recorded:
+            await self.store.set_post_status(EventKind.MINT, event_id, PostStatus.POSTED)

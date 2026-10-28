@@ -3,7 +3,10 @@
 import asyncio
 import signal
 import sys
+from contextlib import AsyncExitStack
 
+from app.chain.reader import ChainReader
+from app.chain.rpc import AlchemyTransport, ChainRpc
 from app.core.config import get_settings
 from app.core.database import DatabaseClient
 from app.core.logging import get_logger, setup_logging
@@ -11,6 +14,7 @@ from app.core.migrations import apply_migrations
 from app.core.settings_reload import SettingsReloader
 from app.discord.bot import DiscordBot
 from app.discord.nft_poster import NFTPoster
+from app.nft.metadata import fetch_token_image
 from app.shared.exceptions import ConfigError, DatabaseError
 
 logger = get_logger(__name__)
@@ -20,11 +24,36 @@ database_client: DatabaseClient | None = None
 discord_bot: DiscordBot | None = None
 nft_poster: NFTPoster | None = None
 settings_reloader: SettingsReloader | None = None
+chain_readers: dict[str, ChainReader] = {}
+chain_tasks: dict[str, asyncio.Task[None]] = {}
+transports: AsyncExitStack = AsyncExitStack()
+
+
+async def start_chain_reader(chain: str) -> None:
+    """Start the reader of a chain that has tracked contracts."""
+    if settings_reloader is None or database_client is None or nft_poster is None:
+        raise RuntimeError("Chain reader started before the bot was initialised")
+    transport = await transports.enter_async_context(AlchemyTransport(chain))
+    reader = ChainReader(
+        chain,
+        ChainRpc(transport),
+        database_client,
+        settings_reloader,
+        nft_poster,
+        fetch_token_image,
+    )
+    chain_readers[chain] = reader
+    chain_tasks[chain] = asyncio.create_task(reader.run())
+    logger.info("chain.reader.started", chain=chain)
 
 
 async def on_contracts_changed(chain: str, contracts: frozenset[str]) -> None:
-    """Log a chain's new tracked-contract set; nothing subscribes to it yet."""
-    logger.info("chain.contracts.updated", chain=chain, contracts=sorted(contracts))
+    """Replace a chain's subscription when its tracked contracts change."""
+    reader = chain_readers.get(chain)
+    if reader is not None:
+        reader.replace_contracts(contracts)
+    elif contracts:
+        await start_chain_reader(chain)
 
 
 async def startup() -> None:
@@ -54,12 +83,19 @@ async def startup() -> None:
 
     nft_poster = NFTPoster(discord_bot)
 
+    for chain in settings_reloader.current.tracked_contracts:
+        await start_chain_reader(chain)
+
     logger.info("application.initialization.completed")
 
 
 async def shutdown() -> None:
     """Cleanup on application shutdown."""
     logger.info("application.shutdown.started")
+
+    for task in chain_tasks.values():
+        task.cancel()
+    await transports.aclose()
 
     # Close Discord bot
     if discord_bot:
@@ -98,7 +134,14 @@ async def main() -> None:
 
         if settings_reloader is None:
             raise RuntimeError("Settings reloader not started")
-        await settings_reloader.run()
+        reload_task = asyncio.create_task(settings_reloader.run())
+        # A failed reader or reload ends the bot instead of leaving it half-running
+        await asyncio.wait(
+            {reload_task, *chain_tasks.values()}, return_when=asyncio.FIRST_COMPLETED
+        )
+        for task in (reload_task, *chain_tasks.values()):
+            if task.done():
+                task.result()
 
     except KeyboardInterrupt:
         logger.info("application.interrupted")

@@ -147,6 +147,13 @@ def create_mint_embed(event: NFTMintEvent, collection_name: str) -> discord.Embe
         inline=True,
     )
 
+    if event.progress_number is not None and event.max_supply is not None:
+        embed.add_field(
+            name="Progress",
+            value=f"#{event.progress_number} of {event.max_supply}",
+            inline=True,
+        )
+
     if event.price_native is not None:
         embed.add_field(
             name="Price",
