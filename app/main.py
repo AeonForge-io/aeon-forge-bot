@@ -27,6 +27,7 @@ chain_readers: dict[str, ChainReader] = {}
 chain_tasks: dict[str, asyncio.Task[None]] = {}
 transports: AsyncExitStack = AsyncExitStack()
 reader_ended = asyncio.Event()
+stop_requested = asyncio.Event()
 
 
 def _note_reader_end(task: asyncio.Task[None]) -> None:
@@ -121,13 +122,9 @@ async def main() -> None:
     loop = asyncio.get_running_loop()
 
     def signal_handler(sig: int) -> None:
+        # main() shuts down and returns; stopping the loop here would leave asyncio.run() waiting
         logger.info("application.signal.received", signal=signal.Signals(sig).name)
-        task = loop.create_task(shutdown())
-
-        def stop_loop(_: asyncio.Task[None]) -> None:
-            loop.stop()
-
-        task.add_done_callback(stop_loop)
+        stop_requested.set()
 
     for sig in (signal.SIGINT, signal.SIGTERM):
 
@@ -144,8 +141,17 @@ async def main() -> None:
         reload_task = asyncio.create_task(settings_reloader.run())
         # A failed reader or reload ends the bot instead of leaving it half-running
         reader_wait = asyncio.create_task(reader_ended.wait())
-        await asyncio.wait({reload_task, reader_wait}, return_when=asyncio.FIRST_COMPLETED)
+        stop_wait = asyncio.create_task(stop_requested.wait())
+        await asyncio.wait(
+            {reload_task, reader_wait, stop_wait}, return_when=asyncio.FIRST_COMPLETED
+        )
         reader_wait.cancel()
+        stop_wait.cancel()
+        if stop_requested.is_set():
+            reload_task.cancel()
+            await asyncio.gather(reload_task, return_exceptions=True)
+            await shutdown()
+            return
         for task in (reload_task, *chain_tasks.values()):
             if task.done():
                 task.result()

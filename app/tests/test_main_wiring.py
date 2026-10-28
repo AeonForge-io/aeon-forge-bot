@@ -1,6 +1,8 @@
 """The hookup between the settings reloader and the chain readers in app.main."""
 
 import asyncio
+import os
+import signal
 from types import SimpleNamespace
 from typing import Any, ClassVar
 
@@ -132,3 +134,25 @@ async def test_startup_starts_one_reader_per_tracked_chain(monkeypatch: pytest.M
 
     assert sorted(r.chain for r in FakeReader.instances) == ["base", "base-sepolia"]
     await stop_tasks()
+
+
+async def test_sigterm_shuts_down_and_main_returns(monkeypatch: pytest.MonkeyPatch) -> None:
+    shut_down: list[bool] = []
+
+    async def fake_startup() -> None:
+        monkeypatch.setattr(main, "settings_reloader", SimpleNamespace(run=asyncio.Event().wait))
+        os.kill(os.getpid(), signal.SIGTERM)
+
+    async def fake_shutdown() -> None:
+        shut_down.append(True)
+
+    monkeypatch.setattr(main, "stop_requested", asyncio.Event())
+    monkeypatch.setattr(main, "startup", fake_startup)
+    monkeypatch.setattr(main, "shutdown", fake_shutdown)
+
+    await asyncio.wait_for(main.main(), timeout=1)
+
+    assert shut_down == [True]
+    loop = asyncio.get_running_loop()
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        loop.remove_signal_handler(sig)
