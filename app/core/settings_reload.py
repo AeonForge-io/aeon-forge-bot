@@ -30,7 +30,6 @@ class BotSettings:
 
     def company_label(self, address: str) -> str | None:
         """The label of a company wallet, or None if the address is not one."""
-        address = address.lower()
         for wallet in self.company_wallets:
             if wallet.address == address:
                 return wallet.label
@@ -42,7 +41,7 @@ def tracked_contracts(collections: list[Collection]) -> dict[str, frozenset[str]
     by_chain: dict[str, set[str]] = {}
     for c in collections:
         if c.is_active and c.track_onchain:
-            by_chain.setdefault(c.chain, set()).add(c.contract_address.lower())
+            by_chain.setdefault(c.chain, set()).add(c.contract_address)
     return {chain: frozenset(contracts) for chain, contracts in by_chain.items()}
 
 
@@ -75,10 +74,7 @@ class SettingsReloader:
         return self.current
 
     async def run(self, interval: float = RELOAD_INTERVAL_SECONDS) -> None:
-        """Reload forever; a failed reload is logged and the last snapshot kept."""
+        """Reload forever; a failed reload raises, so a broken settings read stops the bot."""
         while True:
             await asyncio.sleep(interval)
-            try:
-                await self.reload()
-            except Exception as e:
-                logger.error("settings.reload.failed", error=str(e), exc_info=True)
+            await self.reload()

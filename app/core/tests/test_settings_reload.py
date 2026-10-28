@@ -1,16 +1,20 @@
 """Settings reload: store edits show on the next reload; contract changes are signalled."""
 
+import asyncio
 from dataclasses import replace
+
+import pytest
 
 from app.core.memory_store import MemoryStore
 from app.core.settings_reload import SettingsReloader
 from app.core.tests.conftest import TEST_COLLECTION
+from app.shared.exceptions import DatabaseError
 
 SEPOLIA = replace(
     TEST_COLLECTION,
     collection_id="sepolia-test",
     chain="base-sepolia",
-    contract_address="0xAD1F02D8B22FED6798A6474B65A5778CC0918AFC",
+    contract_address="0xad1f02d8b22fed6798a6474b65a5778cc0918afc",
     discord_channel_id=1215729486994210897,
 )
 
@@ -32,7 +36,7 @@ async def test_added_collection_wallet_and_mark_show_on_next_reload() -> None:
     assert reloader.current.collections == ()
 
     store.add_collection(TEST_COLLECTION)
-    store.add_company_wallet("0xABCDEF0000000000000000000000000000000001", "Treasury")
+    store.add_company_wallet("0xabcdef0000000000000000000000000000000001", "Treasury")
     store.add_marketplace_mark("calldata_tag", "0x360c6ebe", "OpenSea")
     settings = await reloader.reload()
 
@@ -86,3 +90,33 @@ async def test_changing_a_switch_does_not_signal() -> None:
 
     assert len(signals.calls) == 1
     assert settings.collections[0].post_mints is False
+
+
+async def test_run_reloads_each_interval() -> None:
+    store = MemoryStore()
+    reloader = SettingsReloader(store, Signals())
+    task = asyncio.create_task(reloader.run(interval=0.01))
+    store.add_collection(TEST_COLLECTION)
+    await asyncio.sleep(0.1)
+    task.cancel()
+    assert [c.collection_id for c in reloader.current.collections] == ["dragonz-series-1"]
+
+
+async def test_run_fails_loudly_when_a_reload_fails() -> None:
+    class Broken(MemoryStore):
+        async def list_collections(self) -> list:  # type: ignore[type-arg]
+            raise DatabaseError("connection lost")
+
+    reloader = SettingsReloader(Broken(), Signals())
+    with pytest.raises(DatabaseError):
+        await reloader.run(interval=0.01)
+
+
+def test_memory_store_refuses_what_the_schema_refuses() -> None:
+    store = MemoryStore()
+    with pytest.raises(DatabaseError):
+        store.add_collection(replace(TEST_COLLECTION, contract_address="0xABC"))
+    with pytest.raises(DatabaseError):
+        store.add_company_wallet("0xABC", "Treasury")
+    with pytest.raises(DatabaseError):
+        store.add_marketplace_mark("calldata_tag", "0xABC", "X")

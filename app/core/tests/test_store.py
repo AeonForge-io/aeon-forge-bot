@@ -7,7 +7,9 @@ against a migrated throwaway Postgres, so the stand-in can't drift from the sche
 from datetime import UTC, datetime
 from decimal import Decimal
 
-from app.core.store import PostStatus, Store
+from app.core.database import DatabaseClient
+from app.core.memory_store import MemoryStore
+from app.core.store import EventKind, PostStatus, Store
 from app.nft.models import (
     NFTBurnEvent,
     NFTListingEvent,
@@ -159,3 +161,29 @@ async def test_marketplace_baseline(store_with_collection: tuple[Store, int]) ->
     await store.mark_marketplace_polled(cid, "forum_one")
     await store.mark_marketplace_polled(cid, "forum_one")
     assert await store.has_marketplace_baseline(cid, "forum_one")
+
+
+async def test_set_post_status_changes_the_event_status(
+    store_with_collection: tuple[Store, int],
+) -> None:
+    store, cid = store_with_collection
+    for kind, insert in (
+        (EventKind.MINT, store.insert_mint(mint(cid), PostStatus.PENDING)),
+        (EventKind.SALE, store.insert_sale(sale(cid, "s1", TX_A), PostStatus.PENDING)),
+        (EventKind.LISTING, store.insert_listing(listing(cid, "h1"), PostStatus.PENDING)),
+    ):
+        event_id = await insert
+        assert event_id is not None
+        await store.set_post_status(kind, event_id, PostStatus.POSTED)
+        if isinstance(store, MemoryStore):
+            assert [e.status for e in store.events[kind]] == [PostStatus.POSTED]
+        else:
+            assert isinstance(store, DatabaseClient) and store.pool is not None
+            async with store.pool.acquire() as conn:
+                row = await conn.fetchrow(
+                    f"SELECT post_status, posted_at FROM {kind.value} WHERE id = $1",  # noqa: S608
+                    event_id,
+                )
+            assert row is not None
+            assert row["post_status"] == "posted"
+            assert row["posted_at"] is not None

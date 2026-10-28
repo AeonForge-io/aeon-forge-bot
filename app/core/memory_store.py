@@ -11,6 +11,7 @@ from app.core.store import (
     CompanyWallet,
     EventKind,
     MarketplaceMark,
+    MarkKind,
     PostStatus,
 )
 from app.nft.models import (
@@ -33,6 +34,12 @@ UNIQUE_KEYS: dict[EventKind, list[tuple[str, ...]]] = {
         ("collection_id", "transaction_hash", "token_id"),
     ],
 }
+
+
+def _require_lowercase(value: str) -> None:
+    """The schema's CHECK (x = lower(x)): stored addresses and marks are lowercase."""
+    if value != value.lower():
+        raise DatabaseError(f"value must be lowercase: {value}")
 
 
 @dataclass
@@ -61,7 +68,8 @@ class MemoryStore:
     # ---- Setup helpers (tests stand in for Adminer edits) ----
 
     def add_collection(self, collection: Collection) -> Collection:
-        """Add a collection under a new id; contract address stored lowercased."""
+        """Add a collection under a new id; refuses what the schema's CHECKs refuse."""
+        _require_lowercase(collection.contract_address)
         if any(c.collection_id == collection.collection_id for c in self.collections):
             raise DatabaseError(f"duplicate collection {collection.collection_id}")
         added = replace(
@@ -81,21 +89,21 @@ class MemoryStore:
         raise KeyError(collection.id)
 
     def add_company_wallet(self, address: str, label: str) -> None:
-        """Add a company wallet; refuses an address already present."""
-        address = address.lower()
+        """Add a company wallet; refuses a non-lowercase or already present address."""
+        _require_lowercase(address)
         if address in self.company_wallets:
             raise DatabaseError(f"duplicate company wallet {address}")
         self.company_wallets[address] = CompanyWallet(address=address, label=label)
 
     def add_marketplace_mark(
-        self, kind: str, value: str, marketplace: str, note: str | None = None
+        self, kind: MarkKind, value: str, marketplace: str, note: str | None = None
     ) -> None:
-        """Add a mark; refuses a (kind, value) already present."""
-        value = value.lower()
+        """Add a mark; refuses a non-lowercase value or a (kind, value) already present."""
+        _require_lowercase(value)
         if (kind, value) in self.marketplace_marks:
             raise DatabaseError(f"duplicate mark {kind} {value}")
         self.marketplace_marks[(kind, value)] = MarketplaceMark(
-            kind=kind,  # type: ignore[arg-type]
+            kind=kind,
             value=value,
             marketplace=marketplace,
             note=note,
