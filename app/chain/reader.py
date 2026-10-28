@@ -249,12 +249,12 @@ class ChainReader:
     async def _store_transfer(
         self, block: Block, collection: Collection, transfer: TransferLog
     ) -> None:
-        """Record a transfer the collection's transfer_mode lets through; the rest are not kept."""
+        """Record a transfer; the mode decides whether it is posted or kept as skipped."""
         is_company = self.reloader.current.company_label(transfer.sender) is not None
-        if collection.transfer_mode == "off" or (
-            collection.transfer_mode == "company" and not is_company
-        ):
-            return
+        posts = collection.transfer_mode == "all" or (
+            collection.transfer_mode == "company" and is_company
+        )
+        status = PostStatus.PENDING if posts else PostStatus.SKIPPED
         event = NFTTransferEvent(
             collection_id=collection.id,
             token_id=str(transfer.token_id),
@@ -266,8 +266,8 @@ class ChainReader:
             block_number=block.number,
             event_timestamp=datetime.fromtimestamp(block.timestamp, UTC),
         )
-        event_id = await self.store.insert_transfer(event, PostStatus.PENDING)
-        if event_id is not None:
+        event_id = await self.store.insert_transfer(event, status)
+        if event_id is not None and status is PostStatus.PENDING:
             await self.publisher.post_transfer(collection, event_id, event)
 
     def _collection(self, contract: str) -> Collection | None:

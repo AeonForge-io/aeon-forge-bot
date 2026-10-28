@@ -1,10 +1,9 @@
 """Posts recorded events and retries the ones still pending.
 
-An event stays pending when Discord fails; the retry loop posts it again every 60 seconds
+An event stays pending when Discord fails; the 60-second settings loop posts it again
 until it is more than 6 hours past its event time, then marks it expired.
 """
 
-import asyncio
 from collections import defaultdict
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
@@ -18,7 +17,6 @@ from app.shared.exceptions import DiscordAPIError
 
 logger = get_logger(__name__)
 
-RETRY_INTERVAL_SECONDS = 60
 EXPIRY_AFTER = timedelta(hours=6)
 
 
@@ -107,34 +105,29 @@ class EventPublisher:
             else:
                 live_mints[mint.collection_id].append((event_id, mint))
         for collection_id, entries in live_mints.items():
-            collection = self._collection(collection_id)
+            collection = self._collection(collection_id, "mint")
             if collection is not None:
                 await self.post_mints(collection, entries)
 
         for event_id, transfer in transfers:
             if transfer.event_timestamp < oldest:
                 await self._expire(EventKind.TRANSFER, event_id, transfer.token_id)
-            elif (collection := self._collection(transfer.collection_id)) is not None:
+            elif (collection := self._collection(transfer.collection_id, "transfer")) is not None:
                 await self.post_transfer(collection, event_id, transfer)
 
         for event_id, burn in burns:
             if burn.event_timestamp < oldest:
                 await self._expire(EventKind.BURN, event_id, burn.token_id)
-            elif (collection := self._collection(burn.collection_id)) is not None:
+            elif (collection := self._collection(burn.collection_id, "burn")) is not None:
                 await self.post_burn(collection, event_id, burn)
-
-    async def run(self, interval: float = RETRY_INTERVAL_SECONDS) -> None:
-        """Retry forever; a failed store read raises, so a broken database stops the bot."""
-        while True:
-            await asyncio.sleep(interval)
-            await self.retry_pending()
 
     async def _expire(self, kind: EventKind, event_id: int, token_id: str) -> None:
         await self.store.set_post_status(kind, event_id, PostStatus.EXPIRED)
         logger.warning("post.expired", kind=kind.value, event_id=event_id, token_id=token_id)
 
-    def _collection(self, collection_id: int) -> Collection | None:
+    def _collection(self, collection_id: int, kind: str) -> Collection | None:
         for collection in self.reloader.current.collections:
             if collection.id == collection_id:
                 return collection
+        logger.warning("post.retry.collection_missing", kind=kind, collection_id=collection_id)
         return None

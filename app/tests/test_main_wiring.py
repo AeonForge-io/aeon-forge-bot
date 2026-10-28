@@ -140,8 +140,10 @@ async def test_sigterm_shuts_down_and_main_returns(monkeypatch: pytest.MonkeyPat
     shut_down: list[bool] = []
 
     async def fake_startup() -> None:
-        monkeypatch.setattr(main, "settings_reloader", SimpleNamespace(run=asyncio.Event().wait))
-        monkeypatch.setattr(main, "event_publisher", SimpleNamespace(run=asyncio.Event().wait))
+        monkeypatch.setattr(
+            main, "settings_reloader", SimpleNamespace(run=lambda **_: asyncio.Event().wait())
+        )
+        monkeypatch.setattr(main, "event_publisher", SimpleNamespace(retry_pending=None))
         os.kill(os.getpid(), signal.SIGTERM)
 
     async def fake_shutdown() -> None:

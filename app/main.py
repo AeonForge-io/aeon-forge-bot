@@ -140,23 +140,23 @@ async def main() -> None:
             raise RuntimeError("Settings reloader not started")
         if event_publisher is None:
             raise RuntimeError("Event publisher not started")
-        reload_task = asyncio.create_task(settings_reloader.run())
-        retry_task = asyncio.create_task(event_publisher.run())
+        reload_task = asyncio.create_task(
+            settings_reloader.run(after_reload=event_publisher.retry_pending)
+        )
         # A failed reader or reload ends the bot instead of leaving it half-running
         reader_wait = asyncio.create_task(reader_ended.wait())
         stop_wait = asyncio.create_task(stop_requested.wait())
         await asyncio.wait(
-            {reload_task, retry_task, reader_wait, stop_wait}, return_when=asyncio.FIRST_COMPLETED
+            {reload_task, reader_wait, stop_wait}, return_when=asyncio.FIRST_COMPLETED
         )
         reader_wait.cancel()
         stop_wait.cancel()
         if stop_requested.is_set():
             reload_task.cancel()
-            retry_task.cancel()
-            await asyncio.gather(reload_task, retry_task, return_exceptions=True)
+            await asyncio.gather(reload_task, return_exceptions=True)
             await shutdown()
             return
-        for task in (reload_task, retry_task, *chain_tasks.values()):
+        for task in (reload_task, *chain_tasks.values()):
             if task.done():
                 task.result()
 

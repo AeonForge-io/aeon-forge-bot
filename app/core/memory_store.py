@@ -174,7 +174,10 @@ class MemoryStore:
         return next_id
 
     def _pending(self, kind: EventKind) -> list[tuple[int, BaseModel]]:
-        return [(s.id, s.event) for s in self.events[kind] if s.status is PostStatus.PENDING]
+        pending = [s for s in self.events[kind] if s.status is PostStatus.PENDING]
+        # The same order as the Postgres queries: event time, then id
+        pending.sort(key=lambda s: (getattr(s.event, "event_timestamp"), s.id))  # noqa: B009
+        return [(s.id, s.event) for s in pending]
 
     def _insert(self, kind: EventKind, event: BaseModel, status: PostStatus) -> int | None:
         for key in UNIQUE_KEYS[kind]:

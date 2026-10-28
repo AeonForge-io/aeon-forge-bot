@@ -9,6 +9,7 @@ from app.chain.tests.conftest import (
     TEST_CHANNEL,
     TEST_CONTRACT,
     Bot,
+    StopTest,
     block_time,
     transfer_log,
 )
@@ -38,6 +39,17 @@ def statuses(bot: Bot, kind: EventKind) -> list[PostStatus]:
     return [stored.status for stored in bot.store.events[kind]]
 
 
+async def run_loop_once(bot: Bot) -> None:
+    """One pass of the 60-second loop: reload settings, then retry pending posts."""
+
+    async def retry_then_stop() -> None:
+        await bot.publisher.retry_pending()
+        raise StopTest
+
+    with pytest.raises(StopTest):
+        await bot.reloader.run(interval=0, after_reload=retry_then_stop)
+
+
 async def read_transfers(bot: Bot, *logs: dict) -> None:  # type: ignore[type-arg]
     await start_at(bot, 100)
     bot.alchemy.head = 101
@@ -64,6 +76,7 @@ async def test_empty_wallet_table_posts_no_transfers(bot: Bot) -> None:
     await read_transfers(bot, transfer_log(TEST_CONTRACT, 1, 101, TX_A, 0, HOLDER, OTHER))
 
     assert bot.discord.sent == {}
+    assert statuses(bot, EventKind.TRANSFER) == [PostStatus.SKIPPED]
 
 
 async def test_off_mode_posts_no_transfers_even_from_a_company_wallet(bot: Bot) -> None:
@@ -73,6 +86,7 @@ async def test_off_mode_posts_no_transfers_even_from_a_company_wallet(bot: Bot) 
     await read_transfers(bot, transfer_log(TEST_CONTRACT, 1, 101, TX_A, 0, TREASURY, HOLDER))
 
     assert bot.discord.sent == {}
+    assert statuses(bot, EventKind.TRANSFER) == [PostStatus.SKIPPED]
 
 
 async def test_all_mode_posts_every_transfer_and_marks_company_senders(bot: Bot) -> None:
@@ -131,7 +145,7 @@ async def test_failed_post_is_retried_on_the_next_loop(bot: Bot) -> None:
 
     bot.discord.missing_channels = frozenset()
     bot.clock.current = datetime.fromtimestamp(block_time(101), UTC) + timedelta(seconds=60)
-    await bot.publisher.retry_pending()
+    await run_loop_once(bot)
 
     assert len(bot.discord.messages(TEST_CHANNEL)) == 1
     assert statuses(bot, EventKind.BURN) == [PostStatus.POSTED]
@@ -153,15 +167,50 @@ async def test_pending_post_expires_after_six_hours(bot: Bot, kind: str) -> None
         kind
     ]
 
-    bot.discord.missing_channels = frozenset()
     bot.clock.current = event_time + timedelta(hours=6)  # exactly 6 hours is still retried
-    bot.discord.missing_channels = frozenset({TEST_CHANNEL})
-    await bot.publisher.retry_pending()
+    await run_loop_once(bot)
     assert statuses(bot, event_kind) == [PostStatus.PENDING]
 
     bot.discord.missing_channels = frozenset()
     bot.clock.current = event_time + timedelta(hours=6, seconds=1)
-    await bot.publisher.retry_pending()
+    await run_loop_once(bot)
 
     assert statuses(bot, event_kind) == [PostStatus.EXPIRED]
     assert bot.discord.sent == {}
+
+
+async def test_pending_mints_and_transfers_are_posted_on_retry(bot: Bot) -> None:
+    bot.store.add_company_wallet(TREASURY, "Treasury")
+    await bot.reloader.reload()
+    bot.discord.missing_channels = frozenset({TEST_CHANNEL})
+    await read_transfers(
+        bot,
+        transfer_log(TEST_CONTRACT, 1, 101, TX_A, 0, ZERO_ADDRESS, HOLDER),
+        transfer_log(TEST_CONTRACT, 2, 101, TX_A, 1, ZERO_ADDRESS, HOLDER),
+        transfer_log(TEST_CONTRACT, 3, 101, TX_B, 2, TREASURY, OTHER),
+    )
+    assert bot.discord.sent == {}
+
+    bot.discord.missing_channels = frozenset()
+    bot.clock.current = datetime.fromtimestamp(block_time(101), UTC) + timedelta(seconds=60)
+    await run_loop_once(bot)
+
+    mint_card, transfer_card = bot.discord.messages(TEST_CHANNEL)
+    assert "#1" in mint_card.text and "#2" in mint_card.text
+    assert transfer_card.values("From") == ["Aeon Forge (Treasury)"]
+    assert statuses(bot, EventKind.MINT) == [PostStatus.POSTED] * 2
+    assert statuses(bot, EventKind.TRANSFER) == [PostStatus.POSTED]
+
+
+async def test_pending_post_of_a_removed_collection_is_logged(
+    bot: Bot, capsys: pytest.CaptureFixture[str]
+) -> None:
+    bot.discord.missing_channels = frozenset({TEST_CHANNEL})
+    await read_transfers(bot, transfer_log(TEST_CONTRACT, 9, 101, TX_A, 0, HOLDER, ZERO_ADDRESS))
+    bot.store.collections.clear()
+    await bot.reloader.reload()
+
+    await run_loop_once(bot)
+
+    assert "post.retry.collection_missing" in capsys.readouterr().out
+    assert statuses(bot, EventKind.BURN) == [PostStatus.PENDING]
