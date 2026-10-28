@@ -157,7 +157,7 @@ async def main() -> None:
     """Post sample embeds to Discord for testing."""
     settings = get_settings()
 
-    channel_id = 1215729486994210897  # Test channel
+    channel_id = 1215729486994210897  # Live DragonZ NFT channel, not a test channel
 
     print(f"Posting test embeds to channel {channel_id}...")
 
