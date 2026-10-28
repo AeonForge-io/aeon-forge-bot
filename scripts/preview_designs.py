@@ -19,7 +19,9 @@ TEST_CHANNEL_ID = 1215729486994210897
 ENV_FILE = Path("/mnt/volumes/projects/aeon-forge-bot/.env")
 
 MINT_URL = "https://aeonforge.io/mint"
-MARKETPLACE_URLS = {"Forum One": "https://forumone.io", "OpenSea": "https://opensea.io"}
+FORUM_ONE_COLLECTION_URL = "https://forumone.io/collection/8453/{contract}"
+SERIES_1_CONTRACT = "0xc7c1b8a5d8777dac959cb2b274debeda1c0ecc09"
+LIMITED_EDITION_CONTRACT = "0xa02fff7fe01eeb235cb65d501efc65c65d7ad509"
 SERIES_1_IMAGE = "https://aeonforge.myfilebase.com/ipfs/QmbzChm6thk9y9DcooXKyxVfharxQ98ubPhsxSfFmg8eDW/{id}.jpg"
 LIMITED_EDITION_IMAGE = "https://aeonforge.myfilebase.com/ipfs/bafybeihzuj42qllwqgnz4snidjexn5lbca6x6mvhu5qn7hzgcdwnqadr7q/{id}.jpg"
 TX_URL = "https://basescan.org/tx/0x9f2c61d4a7b35e08c1d94f6a2b7e83051c6d4ab9e2f7380d5c1a46b79e03d8ab"
@@ -57,6 +59,7 @@ class Sample:
     token_ids: list[int]
     progress: list[int]  # "#N" per token, mints only
     max_supply: int
+    contract: str
     minter: str = "0xab12…c4cd"
     price: str | None = None
     marketplace: str | None = None
@@ -79,12 +82,10 @@ class Sample:
 
     def buttons(self) -> list[tuple[str, str]]:
         """Transaction link on the left, the post's own link on the right."""
-        extra = []
         if self.is_mint:
-            extra = [("Mint yours", MINT_URL)]
-        elif self.marketplace:
-            extra = [(f"Browse {self.marketplace}", MARKETPLACE_URLS[self.marketplace])]
-        return [("Transaction", TX_URL), *extra]
+            return [("Transaction", TX_URL), ("Mint yours", MINT_URL)]
+        browse = FORUM_ONE_COLLECTION_URL.format(contract=self.contract)
+        return [("Transaction", TX_URL), ("Browse Forum One", browse)]
 
     def detail_lines(self) -> list[tuple[str, str]]:
         """(label, value) lines describing the event."""
@@ -109,22 +110,22 @@ class Sample:
 
 def build_samples() -> dict[str, Sample]:
     return {
-        "mint": Sample("mint", "DragonZ Limited Edition", LIMITED_EDITION_IMAGE, [289], [212], 750, price="0.0015 ETH"),
+        "mint": Sample("mint", "DragonZ Limited Edition", LIMITED_EDITION_IMAGE, [289], [212], 750, LIMITED_EDITION_CONTRACT, price="0.0015 ETH"),
         "batch": Sample(
-            "batch", "DragonZ Limited Edition", LIMITED_EDITION_IMAGE, [301, 302, 303], [210, 211, 212], 750,
+            "batch", "DragonZ Limited Edition", LIMITED_EDITION_IMAGE, [301, 302, 303], [210, 211, 212], 750, LIMITED_EDITION_CONTRACT,
             price="0.0015 ETH",
         ),
         "transfer": Sample(
-            "transfer", "DragonZ Series 1", SERIES_1_IMAGE, [77], [], 1122,
+            "transfer", "DragonZ Series 1", SERIES_1_IMAGE, [77], [], 1122, SERIES_1_CONTRACT,
             sender="Aeon Forge · Treasury", receiver="0x5e9a…17f0",
         ),
-        "burn": Sample("burn", "DragonZ Series 1", SERIES_1_IMAGE, [904], [], 1122, sender="0x31d4…88ae"),
+        "burn": Sample("burn", "DragonZ Series 1", SERIES_1_IMAGE, [904], [], 1122, SERIES_1_CONTRACT, sender="0x31d4…88ae"),
         "listing": Sample(
-            "listing", "DragonZ Series 1", SERIES_1_IMAGE, [412], [], 1122,
+            "listing", "DragonZ Series 1", SERIES_1_IMAGE, [412], [], 1122, SERIES_1_CONTRACT,
             price="0.045 ETH", marketplace="Forum One", sender="0x7c03…a9e1",
         ),
         "sale": Sample(
-            "sale", "DragonZ Series 1", SERIES_1_IMAGE, [412], [], 1122,
+            "sale", "DragonZ Series 1", SERIES_1_IMAGE, [412], [], 1122, SERIES_1_CONTRACT,
             price="0.045 ETH", marketplace="OpenSea", sender="0x7c03…a9e1", receiver="0xb8f6…02d5",
         ),
     }
@@ -175,7 +176,7 @@ async def post(kinds: list[str]) -> None:
         channel = await client.fetch_channel(TEST_CHANNEL_ID)
         assert isinstance(channel, discord.abc.Messageable)
         for kind in kinds:
-            await channel.send(f"**Variant B: Forge Card (round 2)** · {kind}")
+            await channel.send(f"**Variant B: Forge Card (round 3)** · {kind}")
             for view in forge_card(samples[kind]):
                 await channel.send(view=view)
     finally:
