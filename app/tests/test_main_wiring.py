@@ -7,6 +7,7 @@ from typing import Any, ClassVar
 import pytest
 
 from app import main
+from app.core.settings_reload import SettingsReloader
 
 
 class FakeTransport:
@@ -117,10 +118,10 @@ async def test_startup_starts_one_reader_per_tracked_chain(monkeypatch: pytest.M
     async def no_migrations(_pool: object) -> None:
         return None
 
-    real_reloader = main.SettingsReloader
     monkeypatch.setattr(main, "DatabaseClient", FakeDb)
     monkeypatch.setattr(main, "apply_migrations", no_migrations)
-    monkeypatch.setattr(main, "SettingsReloader", lambda _db, cb: real_reloader(FakeStore(), cb))
+    store: Any = FakeStore()
+    monkeypatch.setattr(main, "SettingsReloader", lambda _db, cb: SettingsReloader(store, cb))
     monkeypatch.setattr(main, "DiscordBot", FakeBot)
     monkeypatch.setattr(main, "NFTPoster", lambda _bot: SimpleNamespace())
     monkeypatch.setattr(
