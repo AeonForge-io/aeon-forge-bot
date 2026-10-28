@@ -26,6 +26,8 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
+MAX_EMBEDS_PER_MESSAGE = 10
+
 
 class NFTPoster:
     """Posts NFT events to Discord channels.
@@ -66,28 +68,28 @@ class NFTPoster:
 
         return channel
 
-    async def post_mint(
+    async def post_mints(
         self,
-        event: NFTMintEvent,
+        events: list[NFTMintEvent],
         collection_name: str,
         channel_id: int,
     ) -> None:
-        """Post mint event to Discord.
+        """Post up to 10 mint embeds (Discord's limit) as one message.
 
         Args:
-            event: Mint event data
+            events: Mint events for one message, one embed each
             collection_name: Human-readable collection name
             channel_id: Discord channel ID to post to
         """
         try:
             channel = await self._get_channel(channel_id)
-            embed = create_mint_embed(event, collection_name)
-            await channel.send(embed=embed)
+            embeds = [create_mint_embed(event, collection_name) for event in events]
+            await channel.send(embeds=embeds)
 
             logger.info(
                 "nft.post.mint.success",
                 collection=collection_name,
-                token_id=event.token_id,
+                token_ids=[event.token_id for event in events],
                 channel_id=channel_id,
             )
         except DiscordAPIError:
@@ -96,7 +98,7 @@ class NFTPoster:
             logger.error(
                 "nft.post.mint.failed",
                 collection=collection_name,
-                token_id=event.token_id,
+                token_ids=[event.token_id for event in events],
                 error=str(e),
                 exc_info=True,
             )
