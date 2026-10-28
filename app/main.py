@@ -14,7 +14,6 @@ from app.core.migrations import apply_migrations
 from app.core.settings_reload import SettingsReloader
 from app.discord.bot import DiscordBot
 from app.discord.nft_poster import NFTPoster
-from app.nft.metadata import fetch_token_image
 from app.shared.exceptions import ConfigError, DatabaseError
 
 logger = get_logger(__name__)
@@ -47,7 +46,6 @@ async def start_chain_reader(chain: str) -> None:
         database_client,
         settings_reloader,
         nft_poster,
-        fetch_token_image,
     )
     chain_readers[chain] = reader
     task = asyncio.create_task(reader.run())

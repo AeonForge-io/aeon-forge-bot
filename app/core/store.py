@@ -59,6 +59,7 @@ class Collection:
     post_sales: bool = True
     post_listings: bool = True
     transfer_mode: TransferMode = "company"
+    image_url_template: str | None = None  # "{token_id}" is replaced by the token id
 
 
 @dataclass(frozen=True)

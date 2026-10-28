@@ -5,7 +5,7 @@ Run with: uv run python scripts/test_nft_embeds.py
 This will post one of each embed type (mint, transfer, burn, listing, sale)
 to the configured Discord channel for visual testing.
 
-Images are fetched from IPFS via the configured gateway, just like production.
+Images come from the collection's image URL template, just like production.
 """
 
 import asyncio
@@ -20,6 +20,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 import discord
 
 from app.core.config import get_settings
+from app.core.store import Collection
 from app.discord.nft_embeds import (
     create_burn_embed,
     create_listing_embed,
@@ -27,7 +28,7 @@ from app.discord.nft_embeds import (
     create_sale_embed,
     create_transfer_embed,
 )
-from app.nft.metadata import fetch_token_image
+from app.nft.metadata import token_image_url
 from app.nft.models import (
     NFTBurnEvent,
     NFTListingEvent,
@@ -46,6 +47,15 @@ SAMPLE_TX_HASH = "0xabc123def456789abc123def456789abc123def456789abc123def456789
 COLLECTION_NAME = "DragonZ Series 1"
 TEST_CHAIN = "base"
 TEST_CONTRACT = "0xc7c1b8a5d8777dac959cb2b274debeda1c0ecc09"
+COLLECTION = Collection(
+    id=0,
+    collection_id="dragonz-series-1",
+    name=COLLECTION_NAME,
+    chain=TEST_CHAIN,
+    contract_address=TEST_CONTRACT,
+    discord_channel_id=0,
+    image_url_template="https://aeonforge.myfilebase.com/ipfs/QmbzChm6thk9y9DcooXKyxVfharxQ98ubPhsxSfFmg8eDW/{token_id}.jpg",
+)
 
 # Token IDs to use for testing (will fetch real images from IPFS)
 # Each embed uses a unique token ID to avoid rate limiting
@@ -63,7 +73,7 @@ TEST_TOKEN_IDS = {
 async def create_sample_mint_event() -> NFTMintEvent:
     """Create a sample mint event for testing with real IPFS image."""
     token_id = TEST_TOKEN_IDS["mint"]
-    image_url = await fetch_token_image(TEST_CONTRACT, token_id, TEST_CHAIN)
+    image_url = token_image_url(COLLECTION, token_id)
     return NFTMintEvent(
         collection_id=1,
         token_id=token_id,
@@ -81,7 +91,7 @@ async def create_sample_mint_event() -> NFTMintEvent:
 async def create_sample_transfer_event() -> NFTTransferEvent:
     """Create a sample transfer event for testing with real IPFS image."""
     token_id = TEST_TOKEN_IDS["transfer"]
-    image_url = await fetch_token_image(TEST_CONTRACT, token_id, TEST_CHAIN)
+    image_url = token_image_url(COLLECTION, token_id)
     return NFTTransferEvent(
         collection_id=1,
         token_id=token_id,
@@ -98,7 +108,7 @@ async def create_sample_transfer_event() -> NFTTransferEvent:
 async def create_sample_burn_event() -> NFTBurnEvent:
     """Create a sample burn event for testing with real IPFS image."""
     token_id = TEST_TOKEN_IDS["burn"]
-    image_url = await fetch_token_image(TEST_CONTRACT, token_id, TEST_CHAIN)
+    image_url = token_image_url(COLLECTION, token_id)
     return NFTBurnEvent(
         collection_id=1,
         token_id=token_id,
@@ -114,7 +124,7 @@ async def create_sample_burn_event() -> NFTBurnEvent:
 async def create_sample_listing_event(with_rarity: bool = False) -> NFTListingEvent:
     """Create a sample listing event for testing with real IPFS image."""
     token_id = TEST_TOKEN_IDS["listing_rarity" if with_rarity else "listing"]
-    image_url = await fetch_token_image(TEST_CONTRACT, token_id, TEST_CHAIN)
+    image_url = token_image_url(COLLECTION, token_id)
     return NFTListingEvent(
         collection_id=1,
         token_id=token_id,
@@ -135,7 +145,7 @@ async def create_sample_listing_event(with_rarity: bool = False) -> NFTListingEv
 async def create_sample_sale_event(with_rarity: bool = False) -> NFTSaleEvent:
     """Create a sample sale event for testing with real IPFS image."""
     token_id = TEST_TOKEN_IDS["sale_rarity" if with_rarity else "sale"]
-    image_url = await fetch_token_image(TEST_CONTRACT, token_id, TEST_CHAIN)
+    image_url = token_image_url(COLLECTION, token_id)
     return NFTSaleEvent(
         collection_id=1,
         token_id=token_id,

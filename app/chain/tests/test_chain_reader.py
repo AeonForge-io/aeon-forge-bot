@@ -22,7 +22,6 @@ from app.chain.tests.conftest import (
     sepolia_collection,
 )
 from app.core.store import PostStatus
-from app.nft.metadata import IPFS_GATEWAY
 
 TX_A = "0x" + "a1" * 32
 TX_B = "0x" + "b2" * 32
@@ -61,7 +60,9 @@ async def test_test_contract_mint_posts_in_test_channel_with_progress(bot: Bot) 
     [embed] = message
     assert embed_field(embed, "Progress") == "#212 of 750"
     assert embed.title.endswith("#7")
-    assert embed.image.url == f"{IPFS_GATEWAY}images/7.png"  # tokenURI, then the metadata image
+    assert (
+        embed.image.url == "https://images.test/ipfs/cid/7.jpg"
+    )  # the collection's image_url_template
     assert bot.discord.messages(MAIN_CHANNEL) == []
     assert bot.mint_statuses() == [PostStatus.POSTED]
 
@@ -283,3 +284,18 @@ async def test_no_tracked_contract_opens_no_subscription(bot: Bot) -> None:
         await asyncio.wait_for(bot.reader.connect_once(), timeout=0.05)
 
     assert bot.alchemy.subscription_filters == []
+
+
+async def test_collection_without_image_template_posts_without_image(bot: Bot) -> None:
+    [collection] = bot.store.collections
+    bot.store.update_collection(replace(collection, image_url_template=None))
+    await bot.reloader.reload()
+    await start_at(bot, 100)
+    bot.alchemy.head = 101
+    bot.alchemy.logs = [mint_log(TEST_CONTRACT, 7, 101, TX_A, 0)]
+
+    await bot.reader.connect_once()
+
+    [[embed]] = bot.discord.messages(TEST_CHANNEL)
+    assert embed.image.url is None
+    assert bot.mint_statuses() == [PostStatus.POSTED]

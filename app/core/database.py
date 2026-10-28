@@ -122,6 +122,7 @@ class DatabaseClient:
                 post_sales=row["post_sales"],
                 post_listings=row["post_listings"],
                 transfer_mode=row["transfer_mode"],
+                image_url_template=row["image_url_template"],
             )
             for row in rows
         ]

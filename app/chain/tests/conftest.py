@@ -5,7 +5,6 @@ from dataclasses import dataclass, field
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
-import aiohttp
 import discord
 import pytest
 
@@ -20,8 +19,6 @@ from app.core.memory_store import MemoryStore
 from app.core.settings_reload import SettingsReloader
 from app.core.store import Collection, EventKind, PostStatus
 from app.discord.nft_poster import NFTPoster
-from app.nft import metadata
-from app.nft.metadata import fetch_token_image
 from app.nft.models import ZERO_ADDRESS
 
 TEST_CHANNEL = 1215729486994210897
@@ -61,15 +58,7 @@ def mint_log(
     }
 
 
-TOKEN_URI_SELECTOR = "0xc87b56dd"
-METADATA_BASE = "https://metadata.test/"
-
-
-def abi_string(text: str) -> str:
-    """An ABI-encoded string return value, as eth_call gives it."""
-    raw = text.encode()
-    padded = raw.ljust((len(raw) + 31) // 32 * 32, b"\0")
-    return "0x" + f"{32:064x}" + f"{len(raw):064x}" + padded.hex()
+IMAGE_URL_TEMPLATE = "https://images.test/ipfs/cid/{token_id}.jpg"
 
 
 class StopTest(Exception):
@@ -110,8 +99,6 @@ class FakeAlchemy:
             ]
         if method == "eth_call":
             call, block_hex = params
-            if call["data"].startswith(TOKEN_URI_SELECTOR):
-                return abi_string(METADATA_BASE + str(int(call["data"][10:], 16)))
             if call["data"] == MAX_SUPPLY_SELECTOR:
                 return hex(self.max_supply)
             assert call["data"] == TOTAL_SUPPLY_SELECTOR
@@ -158,51 +145,6 @@ class FakeDiscord:
         return self.sent.get(channel_id, [])
 
 
-class FakeResponse:
-    """An aiohttp response with a status and a JSON body."""
-
-    def __init__(self, body: Any, status: int = 200) -> None:  # JSON body
-        self.body = body
-        self.status = status
-
-    async def __aenter__(self) -> "FakeResponse":
-        return self
-
-    async def __aexit__(self, *exc: object) -> None:
-        return None
-
-    async def json(self) -> Any:  # JSON body
-        return self.body
-
-
-class FakeSession:
-    """Stands in for aiohttp.ClientSession in the token-image lookup: eth_call goes to the fake
-    Alchemy, and the tokenURI metadata is served from METADATA_BASE.
-    """
-
-    def __init__(self, alchemy: FakeAlchemy) -> None:
-        self.alchemy = alchemy
-
-    async def __aenter__(self) -> "FakeSession":
-        return self
-
-    async def __aexit__(self, *exc: object) -> None:
-        return None
-
-    def post(self, _url: str, json: dict[str, Any]) -> FakeResponse:
-        alchemy = self.alchemy
-
-        class RpcResponse(FakeResponse):
-            async def json(self) -> Any:  # JSON body
-                return {"result": await alchemy.request(json["method"], json["params"])}
-
-        return RpcResponse(None)
-
-    def get(self, url: str, **_: Any) -> FakeResponse:
-        token_id = url.removeprefix(METADATA_BASE)
-        return FakeResponse({"image": f"ipfs://images/{token_id}.png"})
-
-
 def embed_field(embed: discord.Embed, name: str) -> str:
     return str(next(f.value for f in embed.fields if f.name == name))
 
@@ -215,6 +157,7 @@ def sepolia_collection(**overrides: Any) -> Collection:
         "chain": "base-sepolia",
         "contract_address": TEST_CONTRACT,
         "discord_channel_id": TEST_CHANNEL,
+        "image_url_template": IMAGE_URL_TEMPLATE,
     }
     return Collection(**{**values, **overrides})
 
@@ -241,8 +184,6 @@ async def _no_change(chain: str, contracts: frozenset[str]) -> None:
 @pytest.fixture
 async def bot(monkeypatch: pytest.MonkeyPatch) -> Bot:
     alchemy = FakeAlchemy()
-    monkeypatch.setattr(aiohttp, "ClientSession", lambda: FakeSession(alchemy))
-    monkeypatch.setattr(metadata, "alchemy_rpc_url", lambda _chain: "https://alchemy.test/")
     fake_discord = FakeDiscord()
     store = MemoryStore()
     store.add_collection(sepolia_collection())
@@ -261,7 +202,6 @@ async def bot(monkeypatch: pytest.MonkeyPatch) -> Bot:
         store,
         reloader,
         NFTPoster(fake_discord),  # type: ignore[arg-type]  # FakeDiscord has the bot's client
-        fetch_token_image,
         sleep=record_sleep,
     )
     return Bot(reader, alchemy, fake_discord, store, reloader, sleeps)

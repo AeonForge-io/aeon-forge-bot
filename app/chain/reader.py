@@ -17,6 +17,7 @@ from app.core.logging import get_logger
 from app.core.settings_reload import SettingsReloader
 from app.core.store import Collection, EventKind, PostStatus, Store
 from app.discord.nft_poster import MAX_EMBEDS_PER_MESSAGE, NFTPoster
+from app.nft.metadata import token_image_url
 from app.nft.models import ZERO_ADDRESS, NFTMintEvent
 from app.shared.exceptions import DiscordAPIError
 
@@ -38,8 +39,6 @@ BACKOFF_MAX_SECONDS = 60.0
 # Chains that poll eth_getLogs when the websocket refuses the logs subscription
 POLLING_FALLBACK_CHAINS = frozenset({"base-sepolia"})
 POLL_INTERVAL_SECONDS = 30.0
-
-ImageLookup = Callable[[str, str, str], Awaitable[str | None]]
 
 
 class MintLog:
@@ -73,7 +72,6 @@ class ChainReader:
         store: Store,
         reloader: SettingsReloader,
         poster: NFTPoster,
-        image_lookup: ImageLookup,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
     ) -> None:
         self.chain = chain
@@ -81,7 +79,6 @@ class ChainReader:
         self.store = store
         self.reloader = reloader
         self.poster = poster
-        self.image_lookup = image_lookup
         self.sleep = sleep
         self.contracts = reloader.current.tracked_contracts.get(chain, frozenset())
         self._next_contracts: frozenset[str] | None = None
@@ -264,9 +261,7 @@ class ChainReader:
                 token_id=str(mint.token_id),
                 to_address=mint.minter,
                 chain=self.chain,
-                token_image_url=await self.image_lookup(
-                    collection.contract_address, str(mint.token_id), self.chain
-                ),
+                token_image_url=token_image_url(collection, str(mint.token_id)),
                 price_native=price_per_token[mint.tx_hash],
                 progress_number=supply - later_mints,
                 max_supply=max_supply,
