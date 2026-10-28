@@ -281,7 +281,10 @@ class ChainReader:
     ) -> None:
         try:
             await self.poster.post_mints(
-                [event for _, event in recorded], collection.name, collection.discord_channel_id
+                [event for _, event in recorded],
+                collection.name,
+                collection.discord_channel_id,
+                collection.mint_url,
             )
         except DiscordAPIError as e:
             # Stays pending; the retry loop (a later card) picks it up

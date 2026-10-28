@@ -73,18 +73,19 @@ class NFTPoster:
         events: list[NFTMintEvent],
         collection_name: str,
         channel_id: int,
+        mint_url: str | None,
     ) -> None:
-        """Post up to 10 mint embeds (Discord's limit) as one message.
+        """Post up to 10 mint tokens as one message (a V2 message holds 40 components).
 
         Args:
-            events: Mint events for one message, one embed each
+            events: Mint events for one message, one section each
             collection_name: Human-readable collection name
             channel_id: Discord channel ID to post to
+            mint_url: Where to mint, for the "Mint yours" button; None shows no button
         """
         try:
             channel = await self._get_channel(channel_id)
-            embeds = [create_mint_embed(event, collection_name) for event in events]
-            await channel.send(embeds=embeds)
+            await channel.send(view=create_mint_embed(events, collection_name, mint_url))
 
             logger.info(
                 "nft.post.mint.success",
@@ -109,6 +110,7 @@ class NFTPoster:
         event: NFTTransferEvent,
         collection_name: str,
         channel_id: int,
+        contract_address: str,
     ) -> None:
         """Post transfer event to Discord.
 
@@ -116,11 +118,11 @@ class NFTPoster:
             event: Transfer event data
             collection_name: Human-readable collection name
             channel_id: Discord channel ID to post to
+            contract_address: NFT contract address (for the Forum One link)
         """
         try:
             channel = await self._get_channel(channel_id)
-            embed = create_transfer_embed(event, collection_name)
-            await channel.send(embed=embed)
+            await channel.send(view=create_transfer_embed(event, collection_name, contract_address))
 
             logger.info(
                 "nft.post.transfer.success",
@@ -145,6 +147,7 @@ class NFTPoster:
         event: NFTBurnEvent,
         collection_name: str,
         channel_id: int,
+        contract_address: str,
     ) -> None:
         """Post burn event to Discord.
 
@@ -152,11 +155,11 @@ class NFTPoster:
             event: Burn event data
             collection_name: Human-readable collection name
             channel_id: Discord channel ID to post to
+            contract_address: NFT contract address (for the Forum One link)
         """
         try:
             channel = await self._get_channel(channel_id)
-            embed = create_burn_embed(event, collection_name)
-            await channel.send(embed=embed)
+            await channel.send(view=create_burn_embed(event, collection_name, contract_address))
 
             logger.info(
                 "nft.post.burn.success",
@@ -181,8 +184,8 @@ class NFTPoster:
         event: NFTListingEvent,
         collection_name: str,
         channel_id: int,
-        chain: str | None = None,
-        contract_address: str | None = None,
+        chain: str,
+        contract_address: str,
     ) -> None:
         """Post listing event to Discord.
 
@@ -190,13 +193,14 @@ class NFTPoster:
             event: Listing event data
             collection_name: Human-readable collection name
             channel_id: Discord channel ID to post to
-            chain: Blockchain network (for marketplace link)
-            contract_address: NFT contract address (for marketplace link)
+            chain: Blockchain network (for the Forum One link)
+            contract_address: NFT contract address (for the Forum One link)
         """
         try:
             channel = await self._get_channel(channel_id)
-            embed = create_listing_embed(event, collection_name, chain, contract_address)
-            await channel.send(embed=embed)
+            await channel.send(
+                view=create_listing_embed(event, collection_name, chain, contract_address)
+            )
 
             logger.info(
                 "nft.post.listing.success",
@@ -222,7 +226,8 @@ class NFTPoster:
         event: NFTSaleEvent,
         collection_name: str,
         channel_id: int,
-        chain: str | None = None,
+        chain: str,
+        contract_address: str,
     ) -> None:
         """Post sale event to Discord.
 
@@ -231,11 +236,13 @@ class NFTPoster:
             collection_name: Human-readable collection name
             channel_id: Discord channel ID to post to
             chain: Blockchain network (for transaction link)
+            contract_address: NFT contract address (for the Forum One link)
         """
         try:
             channel = await self._get_channel(channel_id)
-            embed = create_sale_embed(event, collection_name, chain)
-            await channel.send(embed=embed)
+            await channel.send(
+                view=create_sale_embed(event, collection_name, chain, contract_address)
+            )
 
             logger.info(
                 "nft.post.sale.success",

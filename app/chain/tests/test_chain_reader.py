@@ -4,7 +4,6 @@ import asyncio
 from dataclasses import replace
 from datetime import UTC, datetime
 
-import discord
 import pytest
 
 from app.chain.reader import POLL_INTERVAL_SECONDS
@@ -17,11 +16,11 @@ from app.chain.tests.conftest import (
     Bot,
     StopTest,
     block_time,
-    embed_field,
     mint_log,
     sepolia_collection,
 )
 from app.core.store import PostStatus
+from app.discord.tests.card_view import Card
 
 TX_A = "0x" + "a1" * 32
 TX_B = "0x" + "b2" * 32
@@ -34,8 +33,9 @@ async def start_at(bot: Bot, block: int) -> None:
     )
 
 
-def progress(message: list[discord.Embed]) -> list[str]:
-    return [embed_field(embed, "Progress") for embed in message]
+def progress(card: Card) -> list[str]:
+    """'N / M' of each token in the message."""
+    return [value.split(" ", 1)[1] for value in card.values("Progress")]
 
 
 async def test_test_contract_mint_posts_in_test_channel_with_progress(bot: Bot) -> None:
@@ -56,15 +56,29 @@ async def test_test_contract_mint_posts_in_test_channel_with_progress(bot: Bot) 
 
     await bot.reader.connect_once()
 
-    [message] = bot.discord.messages(TEST_CHANNEL)
-    [embed] = message
-    assert embed_field(embed, "Progress") == "#212 of 750"
-    assert embed.title.endswith("#7")
-    assert (
-        embed.image.url == "https://images.test/ipfs/cid/7.jpg"
-    )  # the collection's image_url_template
+    [card] = bot.discord.messages(TEST_CHANNEL)
+    assert progress(card) == ["212 / 750"]
+    assert "#7" in card.text
+    assert card.images == [
+        "https://images.test/ipfs/cid/7.jpg"
+    ]  # the collection's image_url_template
     assert bot.discord.messages(MAIN_CHANNEL) == []
     assert bot.mint_statuses() == [PostStatus.POSTED]
+
+
+async def test_mint_post_links_to_the_collections_mint_url_when_it_has_one(bot: Bot) -> None:
+    [collection] = bot.store.collections
+    bot.store.update_collection(replace(collection, mint_url="https://aeonforge.io/mint"))
+    await bot.reloader.reload()
+    await start_at(bot, 100)
+    bot.alchemy.head = 101
+    bot.alchemy.logs = [mint_log(TEST_CONTRACT, 7, 101, TX_A, 0)]
+
+    await bot.reader.connect_once()
+
+    [card] = bot.discord.messages(TEST_CHANNEL)
+    assert [label for label, _ in card.buttons] == ["Transaction", "Mint yours"]
+    assert card.buttons[1][1] == "https://aeonforge.io/mint"
 
 
 async def test_first_start_posts_nothing_old(bot: Bot) -> None:
@@ -86,8 +100,8 @@ async def test_twelve_token_mint_splits_into_10_and_2_with_exact_progress(bot: B
     await bot.reader.connect_once()
 
     first, second = bot.discord.messages(TEST_CHANNEL)
-    assert (len(first), len(second)) == (10, 2)
-    assert progress(first) + progress(second) == [f"#{n} of 750" for n in range(1, 13)]
+    assert (len(first.images), len(second.images)) == (10, 2)
+    assert progress(first) + progress(second) == [f"{n} / 750" for n in range(1, 13)]
 
 
 async def test_two_mint_transactions_in_one_block_get_exact_progress(bot: Bot) -> None:
@@ -103,8 +117,8 @@ async def test_two_mint_transactions_in_one_block_get_exact_progress(bot: Bot) -
     await bot.reader.connect_once()
 
     first, second = bot.discord.messages(TEST_CHANNEL)
-    assert progress(first) == ["#41 of 750", "#42 of 750"]
-    assert progress(second) == ["#43 of 750"]
+    assert progress(first) == ["41 / 750", "42 / 750"]
+    assert progress(second) == ["43 / 750"]
 
 
 async def test_paid_mint_shows_price_per_token(bot: Bot) -> None:
@@ -115,8 +129,8 @@ async def test_paid_mint_shows_price_per_token(bot: Bot) -> None:
 
     await bot.reader.connect_once()
 
-    [message] = bot.discord.messages(TEST_CHANNEL)
-    assert [embed_field(embed, "Price") for embed in message] == ["0.05 ETH"] * 3
+    [card] = bot.discord.messages(TEST_CHANNEL)
+    assert card.values("Price") == ["0.05 ETH"] * 3
 
 
 async def test_free_mint_shows_no_price(bot: Bot) -> None:
@@ -126,8 +140,8 @@ async def test_free_mint_shows_no_price(bot: Bot) -> None:
 
     await bot.reader.connect_once()
 
-    [[embed]] = bot.discord.messages(TEST_CHANNEL)
-    assert [f.name for f in embed.fields if f.name == "Price"] == []
+    [card] = bot.discord.messages(TEST_CHANNEL)
+    assert card.values("Price") == []
 
 
 async def test_log_seen_by_subscription_and_catch_up_posts_once(bot: Bot) -> None:
@@ -170,8 +184,8 @@ async def test_catch_up_stops_at_six_hours(bot: Bot) -> None:
 
     await bot.reader.connect_once()
 
-    [[embed]] = bot.discord.messages(TEST_CHANNEL)
-    assert embed.title.endswith("#2")
+    [card] = bot.discord.messages(TEST_CHANNEL)
+    assert "#2" in card.text
     cursor = await bot.store.get_cursor("base-sepolia")
     assert cursor is not None and cursor.last_block == 12_100
 
@@ -195,8 +209,8 @@ async def test_post_mints_off_records_skipped_and_turning_on_posts_nothing_old(b
     await start_at(bot, 100)  # re-reading block 101 must not post the skipped mint
     await bot.reader.connect_once()
 
-    [[embed]] = bot.discord.messages(TEST_CHANNEL)
-    assert embed.title.endswith("#2")
+    [card] = bot.discord.messages(TEST_CHANNEL)
+    assert "#2" in card.text
     assert bot.mint_statuses() == [PostStatus.SKIPPED, PostStatus.POSTED]
 
 
@@ -228,8 +242,8 @@ async def test_collection_added_later_is_tracked_from_the_current_block(bot: Bot
     bot.alchemy.logs.append(mint_log(SECOND_CONTRACT, 2, 102, TX_B, 0))
     await bot.reader.connect_once()
 
-    [[embed]] = bot.discord.messages(TEST_CHANNEL)
-    assert embed.title.endswith("#2")
+    [card] = bot.discord.messages(TEST_CHANNEL)
+    assert "#2" in card.text
     assert bot.alchemy.subscription_filters[-1]["address"] == sorted(
         [TEST_CONTRACT, SECOND_CONTRACT]
     )
@@ -296,6 +310,6 @@ async def test_collection_without_image_template_posts_without_image(bot: Bot) -
 
     await bot.reader.connect_once()
 
-    [[embed]] = bot.discord.messages(TEST_CHANNEL)
-    assert embed.image.url is None
+    [card] = bot.discord.messages(TEST_CHANNEL)
+    assert card.images == []
     assert bot.mint_statuses() == [PostStatus.POSTED]

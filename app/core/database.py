@@ -123,6 +123,7 @@ class DatabaseClient:
                 post_listings=row["post_listings"],
                 transfer_mode=row["transfer_mode"],
                 image_url_template=row["image_url_template"],
+                mint_url=row["mint_url"],
             )
             for row in rows
         ]

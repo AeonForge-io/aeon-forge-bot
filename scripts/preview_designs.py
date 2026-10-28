@@ -8,7 +8,6 @@ so it runs from any worktree.
 
 import argparse
 import asyncio
-from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -22,9 +21,13 @@ MINT_URL = "https://aeonforge.io/mint"
 FORUM_ONE_COLLECTION_URL = "https://forumone.io/collection/8453/{contract}"
 SERIES_1_CONTRACT = "0xc7c1b8a5d8777dac959cb2b274debeda1c0ecc09"
 LIMITED_EDITION_CONTRACT = "0xa02fff7fe01eeb235cb65d501efc65c65d7ad509"
-SERIES_1_IMAGE = "https://aeonforge.myfilebase.com/ipfs/QmbzChm6thk9y9DcooXKyxVfharxQ98ubPhsxSfFmg8eDW/{id}.jpg"
+SERIES_1_IMAGE = (
+    "https://aeonforge.myfilebase.com/ipfs/QmbzChm6thk9y9DcooXKyxVfharxQ98ubPhsxSfFmg8eDW/{id}.jpg"
+)
 LIMITED_EDITION_IMAGE = "https://aeonforge.myfilebase.com/ipfs/bafybeihzuj42qllwqgnz4snidjexn5lbca6x6mvhu5qn7hzgcdwnqadr7q/{id}.jpg"
-TX_URL = "https://basescan.org/tx/0x9f2c61d4a7b35e08c1d94f6a2b7e83051c6d4ab9e2f7380d5c1a46b79e03d8ab"
+TX_URL = (
+    "https://basescan.org/tx/0x9f2c61d4a7b35e08c1d94f6a2b7e83051c6d4ab9e2f7380d5c1a46b79e03d8ab"
+)
 
 # Website palette (af-website Tailwind theme)
 CYAN = 0x00F3FF
@@ -110,30 +113,81 @@ class Sample:
 
 def build_samples() -> dict[str, Sample]:
     return {
-        "mint": Sample("mint", "DragonZ Limited Edition", LIMITED_EDITION_IMAGE, [289], [212], 750, LIMITED_EDITION_CONTRACT, price="0.0015 ETH"),
+        "mint": Sample(
+            "mint",
+            "DragonZ Limited Edition",
+            LIMITED_EDITION_IMAGE,
+            [289],
+            [212],
+            750,
+            LIMITED_EDITION_CONTRACT,
+            price="0.0015 ETH",
+        ),
         "batch": Sample(
-            "batch", "DragonZ Limited Edition", LIMITED_EDITION_IMAGE, [301, 302, 303], [210, 211, 212], 750, LIMITED_EDITION_CONTRACT,
+            "batch",
+            "DragonZ Limited Edition",
+            LIMITED_EDITION_IMAGE,
+            [301, 302, 303],
+            [210, 211, 212],
+            750,
+            LIMITED_EDITION_CONTRACT,
             price="0.0015 ETH",
         ),
         "transfer": Sample(
-            "transfer", "DragonZ Series 1", SERIES_1_IMAGE, [77], [], 1122, SERIES_1_CONTRACT,
-            sender="Aeon Forge · Treasury", receiver="0x5e9a…17f0",
+            "transfer",
+            "DragonZ Series 1",
+            SERIES_1_IMAGE,
+            [77],
+            [],
+            1122,
+            SERIES_1_CONTRACT,
+            sender="Aeon Forge · Treasury",
+            receiver="0x5e9a…17f0",
         ),
-        "burn": Sample("burn", "DragonZ Series 1", SERIES_1_IMAGE, [904], [], 1122, SERIES_1_CONTRACT, sender="0x31d4…88ae"),
+        "burn": Sample(
+            "burn",
+            "DragonZ Series 1",
+            SERIES_1_IMAGE,
+            [904],
+            [],
+            1122,
+            SERIES_1_CONTRACT,
+            sender="0x31d4…88ae",
+        ),
         "listing": Sample(
-            "listing", "DragonZ Series 1", SERIES_1_IMAGE, [412], [], 1122, SERIES_1_CONTRACT,
-            price="0.045 ETH", marketplace="Forum One", sender="0x7c03…a9e1",
+            "listing",
+            "DragonZ Series 1",
+            SERIES_1_IMAGE,
+            [412],
+            [],
+            1122,
+            SERIES_1_CONTRACT,
+            price="0.045 ETH",
+            marketplace="Forum One",
+            sender="0x7c03…a9e1",
         ),
         "sale": Sample(
-            "sale", "DragonZ Series 1", SERIES_1_IMAGE, [412], [], 1122, SERIES_1_CONTRACT,
-            price="0.045 ETH", marketplace="OpenSea", sender="0x7c03…a9e1", receiver="0xb8f6…02d5",
+            "sale",
+            "DragonZ Series 1",
+            SERIES_1_IMAGE,
+            [412],
+            [],
+            1122,
+            SERIES_1_CONTRACT,
+            price="0.045 ETH",
+            marketplace="OpenSea",
+            sender="0x7c03…a9e1",
+            receiver="0xb8f6…02d5",
         ),
     }
 
 
-def _link_row(sample: Sample) -> ui.ActionRow:
+def _link_row(sample: Sample) -> ui.ActionRow[ui.LayoutView]:
     return ui.ActionRow(
-        *[ui.Button(style=discord.ButtonStyle.link, label=label, url=url) for label, url in sample.buttons()]
+        *[
+            ui.Button(style=discord.ButtonStyle.link, label=label, url=url)
+            for label, url in sample.buttons()
+        ]
     )
 
 
@@ -144,14 +198,22 @@ def forge_card(sample: Sample) -> list[ui.LayoutView]:
         n = sample.progress[index] if sample.progress else 0
         details = sample.detail_lines()
         if sample.is_mint:
-            details = [(label, sample.bar(n) if label == "Progress" else value) for label, value in details]
-        container = ui.Container(accent_colour=TYPE_COLOURS[sample.kind])
-        container.add_item(ui.TextDisplay(f"## {sample.title(token_id)}\n-# {TYPE_VERBS[sample.kind]} on Base"))
-        gallery = ui.MediaGallery()
+            details = [
+                (label, sample.bar(n) if label == "Progress" else value) for label, value in details
+            ]
+        container: ui.Container[ui.LayoutView] = ui.Container(
+            accent_colour=TYPE_COLOURS[sample.kind]
+        )
+        container.add_item(
+            ui.TextDisplay(f"## {sample.title(token_id)}\n-# {TYPE_VERBS[sample.kind]} on Base")
+        )
+        gallery: ui.MediaGallery[ui.LayoutView] = ui.MediaGallery()
         gallery.add_item(media=sample.image(token_id), description=sample.title(token_id))
         container.add_item(gallery)
         container.add_item(ui.Separator())
-        container.add_item(ui.TextDisplay("\n".join(f"**{label}** {value}" for label, value in details)))
+        container.add_item(
+            ui.TextDisplay("\n".join(f"**{label}** {value}" for label, value in details))
+        )
         container.add_item(ui.Separator())
         container.add_item(_link_row(sample))
         view = ui.LayoutView()
@@ -174,7 +236,8 @@ async def post(kinds: list[str]) -> None:
     await client.login(read_token())
     try:
         channel = await client.fetch_channel(TEST_CHANNEL_ID)
-        assert isinstance(channel, discord.abc.Messageable)
+        if not isinstance(channel, discord.abc.Messageable):
+            raise SystemExit(f"Channel {TEST_CHANNEL_ID} cannot take messages")
         for kind in kinds:
             await channel.send(f"**Variant B: Forge Card (round 3)** · {kind}")
             for view in forge_card(samples[kind]):
