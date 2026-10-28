@@ -6,7 +6,6 @@ import discord
 
 from app.discord.nft_event_colors import (
     BURN_COLOR,
-    DELISTING_COLOR,
     LISTING_COLOR,
     MINT_COLOR,
     SALE_COLOR,
@@ -14,7 +13,6 @@ from app.discord.nft_event_colors import (
 )
 from app.nft.models import (
     NFTBurnEvent,
-    NFTDelistingEvent,
     NFTListingEvent,
     NFTMintEvent,
     NFTSaleEvent,
@@ -383,51 +381,5 @@ def create_sale_embed(
             value=f"[View on Explorer]({explorer_url})",
             inline=True,
         )
-
-    return embed
-
-
-def create_delisting_embed(event: NFTDelistingEvent, collection_name: str) -> discord.Embed:
-    """Create Discord embed for delisting (cancelled listing) event.
-
-    Args:
-        event: Delisting event data
-        collection_name: Human-readable collection name
-
-    Returns:
-        Discord embed ready to send
-    """
-    # Use token name if available, otherwise collection + token ID
-    title_name = event.token_name or f"{collection_name} #{event.token_id}"
-
-    embed = discord.Embed(
-        title=f"❌ Delisted | {title_name}",
-        color=DELISTING_COLOR,
-        timestamp=event.event_timestamp,
-    )
-
-    # Large image at top
-    if event.token_image_url:
-        embed.set_image(url=event.token_image_url)
-
-    # Two-column layout
-    embed.add_field(
-        name="Seller",
-        value=f"`{event.short_seller_address}`",
-        inline=True,
-    )
-
-    if event.original_price_native:
-        embed.add_field(
-            name="Was Listed",
-            value=_format_eth_price(event.original_price_native),
-            inline=True,
-        )
-
-    embed.add_field(
-        name="Preferred Marketplace",
-        value=_format_marketplace(event.marketplace),
-        inline=True,
-    )
 
     return embed

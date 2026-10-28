@@ -1,10 +1,10 @@
 services:
-  activity-bot:
+  aeon-forge-bot:
     build:
       context: .
       dockerfile: Dockerfile
-    image: activity-bot:latest
-    container_name: activity-bot
+    image: aeon-forge-bot:latest
+    container_name: aeon-forge-bot
     env_file: .env
     environment:
       - PYTHONUNBUFFERED=1
@@ -14,7 +14,6 @@ services:
     volumes:
       - ./app:/app/app:ro
       - ./data:/app/data
-      - ./collections.json:/app/collections.json:ro
     healthcheck:
       test: ["CMD", "python", "-c", "import sys; sys.exit(0)"]
       interval: 30s
@@ -37,16 +36,16 @@ services:
 
   postgres:
     image: postgres:16-alpine
-    container_name: activity-bot-postgres
+    container_name: aeon-forge-bot-postgres
     environment:
-      POSTGRES_DB: activity_bot
-      POSTGRES_USER: activity_bot
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+      POSTGRES_DB: aeon_forge_bot
+      POSTGRES_USER: aeon_forge_bot
+      # Same password the bot reads as DB_PASSWORD from .env
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD must be set in .env}
     volumes:
       - ./data/postgres/pgdata:/var/lib/postgresql/data
-      - ./migrations:/docker-entrypoint-initdb.d:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U activity_bot -d activity_bot"]
+      test: ["CMD-SHELL", "pg_isready -U aeon_forge_bot -d aeon_forge_bot"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -56,7 +55,7 @@ services:
 
   adminer:
     image: adminer:latest
-    container_name: activity-bot-adminer
+    container_name: aeon-forge-bot-adminer
     environment:
       ADMINER_DEFAULT_SERVER: postgres
     ports:

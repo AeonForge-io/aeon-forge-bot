@@ -3,11 +3,8 @@
 from datetime import UTC, datetime
 from decimal import Decimal
 
-import pytest
-
 from app.discord.nft_embeds import (
     create_burn_embed,
-    create_delisting_embed,
     create_listing_embed,
     create_mint_embed,
     create_sale_embed,
@@ -15,7 +12,6 @@ from app.discord.nft_embeds import (
 )
 from app.discord.nft_event_colors import (
     BURN_COLOR,
-    DELISTING_COLOR,
     LISTING_COLOR,
     MINT_COLOR,
     SALE_COLOR,
@@ -23,7 +19,6 @@ from app.discord.nft_event_colors import (
 )
 from app.nft.models import (
     NFTBurnEvent,
-    NFTDelistingEvent,
     NFTListingEvent,
     NFTMintEvent,
     NFTSaleEvent,
@@ -134,7 +129,7 @@ class TestListingEmbed:
         field_names = [f.name for f in embed.fields]
         assert "Seller" in field_names
         assert "Price" in field_names
-        assert "Marketplace" in field_names
+        assert "Preferred Marketplace" in field_names
 
     def test_create_listing_embed_with_magic_eden_link(self) -> None:
         """Test listing embed includes Magic Eden link when chain/contract provided."""
@@ -153,9 +148,9 @@ class TestListingEmbed:
         )
 
         # Check that marketplace field has a link
-        marketplace_field = next(f for f in embed.fields if f.name == "Marketplace")
+        marketplace_field = next(f for f in embed.fields if f.name == "Preferred Marketplace")
         assert "View on Magic Eden" in marketplace_field.value
-        assert "magiceden.io" in marketplace_field.value
+        assert "magiceden.us" in marketplace_field.value
 
     def test_create_listing_embed_with_rarity(self) -> None:
         """Test listing embed includes rarity when available."""
@@ -219,29 +214,3 @@ class TestSaleEmbed:
         assert "Buyer" in field_names
         assert "Price" in field_names
         assert "Transaction" in field_names
-
-
-class TestDelistingEmbed:
-    """Tests for delisting embed creation."""
-
-    def test_create_delisting_embed(self) -> None:
-        """Test creating a delisting embed."""
-        event = NFTDelistingEvent(
-            collection_id=1,
-            token_id="42",
-            seller_address="0xabcdef1234567890abcdef1234567890abcdef12",
-            marketplace="magic_eden",
-            original_price_native=Decimal("0.5"),
-            delisting_id="delist_123",
-            event_timestamp=datetime.now(UTC),
-        )
-
-        embed = create_delisting_embed(event, "Test Collection")
-
-        assert "Delisted" in embed.title
-        assert embed.color.value == DELISTING_COLOR
-
-        field_names = [f.name for f in embed.fields]
-        assert "Seller" in field_names
-        assert "Was Listed" in field_names
-        assert "Preferred Marketplace" in field_names

@@ -36,7 +36,6 @@ from app.nft.models import (
     NFTTransferEvent,
 )
 
-
 # Sample addresses
 SAMPLE_SELLER = "0x1234567890abcdef1234567890abcdef12345678"
 SAMPLE_BUYER = "0xabcdef1234567890abcdef1234567890abcdef12"
@@ -158,8 +157,7 @@ async def main() -> None:
     """Post sample embeds to Discord for testing."""
     settings = get_settings()
 
-    # Use the NFT channel from the collections config
-    channel_id = 1215729486994210897  # DragonZ channel
+    channel_id = 1215729486994210897  # Test channel
 
     print(f"Posting test embeds to channel {channel_id}...")
 
@@ -225,9 +223,14 @@ async def main() -> None:
             listing_event_rarity = await create_sample_listing_event(with_rarity=True)
             print("Posting listing embed (with rarity)...")
             listing_embed_rarity = create_listing_embed(
-                listing_event_rarity, COLLECTION_NAME, chain=TEST_CHAIN, contract_address=TEST_CONTRACT
+                listing_event_rarity,
+                COLLECTION_NAME,
+                chain=TEST_CHAIN,
+                contract_address=TEST_CONTRACT,
             )
-            await channel.send(content="**5. Listing Event** (with rarity)", embed=listing_embed_rarity)
+            await channel.send(
+                content="**5. Listing Event** (with rarity)", embed=listing_embed_rarity
+            )
             await asyncio.sleep(5)
 
             # 6. Sale embed without rarity
@@ -242,7 +245,9 @@ async def main() -> None:
             print("Fetching sale (rarity) image from IPFS...")
             sale_event_rarity = await create_sample_sale_event(with_rarity=True)
             print("Posting sale embed (with rarity)...")
-            sale_embed_rarity = create_sale_embed(sale_event_rarity, COLLECTION_NAME, chain=TEST_CHAIN)
+            sale_embed_rarity = create_sale_embed(
+                sale_event_rarity, COLLECTION_NAME, chain=TEST_CHAIN
+            )
             await channel.send(content="**7. Sale Event** (with rarity)", embed=sale_embed_rarity)
 
             # Post footer message
@@ -253,6 +258,7 @@ async def main() -> None:
         except Exception as e:
             print(f"Error posting embeds: {e}")
             import traceback
+
             traceback.print_exc()
 
         finally:

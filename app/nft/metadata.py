@@ -2,6 +2,7 @@
 
 import aiohttp
 
+from app.core.config import get_settings
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
@@ -9,11 +10,19 @@ logger = get_logger(__name__)
 # IPFS gateway for fetching metadata and images
 IPFS_GATEWAY = "https://aeonforge.mypinata.cloud/ipfs/"
 
-# RPC endpoints for contract calls
-RPC_URLS: dict[str, str] = {
-    "base": "https://mainnet.base.org",
-    "base-sepolia": "https://sepolia.base.org",
+# Alchemy network name per chain, for contract calls
+ALCHEMY_NETWORKS: dict[str, str] = {
+    "base": "base-mainnet",
+    "base-sepolia": "base-sepolia",
 }
+
+
+def alchemy_rpc_url(chain: str) -> str | None:
+    """Get the Alchemy HTTPS RPC URL for a chain, or None if unsupported."""
+    network = ALCHEMY_NETWORKS.get(chain)
+    if network is None:
+        return None
+    return f"https://{network}.g.alchemy.com/v2/{get_settings().alchemy_api_key}"
 
 
 def convert_ipfs_url(url: str) -> str:
@@ -55,7 +64,7 @@ async def fetch_token_image(
     Returns:
         Image URL using IPFS gateway, or None if fetch fails
     """
-    rpc_url = RPC_URLS.get(chain)
+    rpc_url = alchemy_rpc_url(chain)
     if not rpc_url:
         logger.debug("metadata.fetch.unsupported_chain", chain=chain)
         return None
@@ -100,7 +109,9 @@ async def fetch_token_image(
             metadata_url = convert_ipfs_url(token_uri)
 
             # Fetch metadata JSON
-            async with session.get(metadata_url, timeout=aiohttp.ClientTimeout(total=10)) as response:
+            async with session.get(
+                metadata_url, timeout=aiohttp.ClientTimeout(total=10)
+            ) as response:
                 if response.status != 200:
                     logger.debug(
                         "metadata.fetch.failed",

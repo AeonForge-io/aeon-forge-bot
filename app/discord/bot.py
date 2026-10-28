@@ -1,9 +1,9 @@
 """Discord bot lifecycle management."""
 
-from typing import Any
+import asyncio
+from types import TracebackType
 
 import discord
-from discord import app_commands
 
 from app.core.logging import get_logger
 from app.shared.exceptions import DiscordAPIError
@@ -14,31 +14,18 @@ logger = get_logger(__name__)
 class DiscordBot:
     """Discord bot manager with async context manager lifecycle.
 
-    Provides connection management and channel access for posting embeds.
-    Follows the async context manager pattern from github/client.py.
+    Provides the connected client; each post picks its channel by ID.
     """
 
-    def __init__(
-        self,
-        token: str,
-        channel_id: int,
-        enable_commands: bool = True,
-        db_client: Any = None,
-    ) -> None:
-        """Initialize Discord bot with token and target channel.
+    def __init__(self, token: str) -> None:
+        """Initialize Discord bot with its token.
 
         Args:
             token: Discord bot token
-            channel_id: Discord channel ID to post to
-            enable_commands: Whether to enable slash commands (default: True)
-            db_client: Optional database client for slash commands
         """
         self.token = token
-        self.channel_id = channel_id
-        self.enable_commands = enable_commands
-        self.db_client = db_client
         self.client: discord.Client | None = None
-        self.tree: app_commands.CommandTree | None = None
+        self._connect_task: asyncio.Task[None] | None = None
 
     async def __aenter__(self) -> "DiscordBot":
         """Context manager entry: create client and login.
@@ -47,7 +34,7 @@ class DiscordBot:
             Self for use in async with statement
 
         Raises:
-            DiscordAPIError: If login fails or channel is inaccessible
+            DiscordAPIError: If login fails
         """
         intents = discord.Intents.default()
         self.client = discord.Client(intents=intents)
@@ -66,37 +53,10 @@ class DiscordBot:
 
             # Start the client (this will trigger on_ready)
             # We need to start the websocket connection but not block
-            import asyncio
-
-            asyncio.create_task(self.client.connect(reconnect=True))
+            self._connect_task = asyncio.create_task(self.client.connect(reconnect=True))
 
             # Wait for the client to be ready
             await self.client.wait_until_ready()
-
-            # Validate channel access
-            channel = self.client.get_channel(self.channel_id)
-            if channel is None:
-                raise DiscordAPIError(f"Cannot access channel {self.channel_id}")
-
-            if not isinstance(channel, discord.TextChannel):
-                raise DiscordAPIError(f"Channel {self.channel_id} is not a text channel")
-
-            logger.info("discord.bot.channel.validated", channel_id=self.channel_id)
-
-            # Setup slash commands if enabled
-            if self.enable_commands and self.db_client:
-                from app.discord.commands import setup_commands
-
-                self.tree = app_commands.CommandTree(self.client)
-                setup_commands(self.tree, self.db_client)
-
-                # Sync commands (this may take a few minutes to propagate)
-                try:
-                    synced = await self.tree.sync()
-                    logger.info("discord.commands.synced", count=len(synced))
-                except Exception as e:
-                    logger.error("discord.commands.sync.failed", error=str(e), exc_info=True)
-                    # Don't fail startup if command sync fails
 
         except discord.HTTPException as e:
             logger.error("discord.bot.login.failed", error=str(e), exc_info=True)
@@ -108,7 +68,7 @@ class DiscordBot:
         self,
         exc_type: type[BaseException] | None,
         exc_val: BaseException | None,
-        exc_tb: Any,
+        exc_tb: TracebackType | None,
     ) -> None:
         """Context manager exit: close Discord client.
 
@@ -120,25 +80,3 @@ class DiscordBot:
         if self.client:
             await self.client.close()
             logger.info("discord.bot.closed")
-
-    def get_channel(self) -> discord.TextChannel:
-        """Get the configured Discord text channel.
-
-        Returns:
-            Discord text channel for posting
-
-        Raises:
-            DiscordAPIError: If client not initialized or channel inaccessible
-        """
-        if not self.client:
-            raise DiscordAPIError("Discord client not initialized")
-
-        channel = self.client.get_channel(self.channel_id)
-
-        if channel is None:
-            raise DiscordAPIError(f"Cannot access channel {self.channel_id}")
-
-        if not isinstance(channel, discord.TextChannel):
-            raise DiscordAPIError(f"Channel {self.channel_id} is not a text channel")
-
-        return channel

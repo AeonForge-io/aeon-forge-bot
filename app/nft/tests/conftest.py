@@ -5,39 +5,13 @@ from decimal import Decimal
 
 import pytest
 
-from app.nft.config import NFTCollectionConfig, NFTCollectionsConfig
 from app.nft.models import (
     NFTBurnEvent,
-    NFTDelistingEvent,
     NFTListingEvent,
     NFTMintEvent,
     NFTSaleEvent,
     NFTTransferEvent,
 )
-
-
-@pytest.fixture
-def sample_collection_config() -> NFTCollectionConfig:
-    """Create a sample NFT collection configuration."""
-    return NFTCollectionConfig(
-        id="test-collection",
-        name="Test Collection",
-        chain="base",
-        contract_address="0x1234567890123456789012345678901234567890",
-        discord_channel_id=123456789,
-        track_onchain=True,
-        track_marketplace=True,
-        marketplaces=["magic_eden", "opensea", "rarible"],
-        is_active=True,
-    )
-
-
-@pytest.fixture
-def sample_collections_config(
-    sample_collection_config: NFTCollectionConfig,
-) -> NFTCollectionsConfig:
-    """Create a sample NFT collections configuration."""
-    return NFTCollectionsConfig(collections=[sample_collection_config])
 
 
 @pytest.fixture
@@ -118,20 +92,5 @@ def sample_sale_event() -> NFTSaleEvent:
         floor_price_native=Decimal("0.25"),
         rarity_rank=42,
         sale_id="sale_123",
-        event_timestamp=datetime.now(UTC),
-    )
-
-
-@pytest.fixture
-def sample_delisting_event() -> NFTDelistingEvent:
-    """Create a sample NFT delisting event."""
-    return NFTDelistingEvent(
-        collection_id=1,
-        token_id="123",
-        token_name="Test NFT #123",
-        seller_address="0xabcdef1234567890abcdef1234567890abcdef12",
-        marketplace="magic_eden",
-        original_price_native=Decimal("0.5"),
-        delisting_id="delist_123",
         event_timestamp=datetime.now(UTC),
     )

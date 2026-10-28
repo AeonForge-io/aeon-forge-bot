@@ -8,7 +8,6 @@ import pytest
 from app.nft.models import (
     ZERO_ADDRESS,
     NFTBurnEvent,
-    NFTDelistingEvent,
     NFTListingEvent,
     NFTMintEvent,
     NFTSaleEvent,
@@ -39,24 +38,6 @@ class TestNFTMintEvent:
         """Test shortened address formatting."""
         assert sample_mint_event.short_to_address == "0xabcd...ef12"
 
-    def test_from_thirdweb_webhook(self) -> None:
-        """Test creating from Thirdweb webhook data."""
-        timestamp = datetime.now(UTC)
-        event = NFTMintEvent.from_thirdweb_webhook(
-            collection_id=1,
-            token_id="123",
-            to_address="0xabcdef1234567890abcdef1234567890abcdef12",
-            transaction_hash="0x1234",
-            block_number=12345,
-            timestamp=timestamp,
-            price_native=Decimal("0.1"),
-        )
-
-        assert event.token_id == "123"
-        assert event.to_address == "0xabcdef1234567890abcdef1234567890abcdef12"
-        assert event.block_number == 12345
-        assert event.price_native == Decimal("0.1")
-
 
 class TestNFTTransferEvent:
     """Tests for NFTTransferEvent model."""
@@ -67,23 +48,6 @@ class TestNFTTransferEvent:
         assert "abcd" in sample_transfer_event.short_from_address
         assert "5678" in sample_transfer_event.short_to_address
 
-    def test_from_thirdweb_webhook(self) -> None:
-        """Test creating from Thirdweb webhook data."""
-        timestamp = datetime.now(UTC)
-        event = NFTTransferEvent.from_thirdweb_webhook(
-            collection_id=1,
-            token_id="123",
-            from_address="0xabcd",
-            to_address="0x1234",
-            transaction_hash="0x5678",
-            block_number=100,
-            timestamp=timestamp,
-        )
-
-        assert event.token_id == "123"
-        assert event.from_address == "0xabcd"
-        assert event.to_address == "0x1234"
-
 
 class TestNFTBurnEvent:
     """Tests for NFTBurnEvent model."""
@@ -92,21 +56,6 @@ class TestNFTBurnEvent:
         """Test creating a burn event."""
         assert sample_burn_event.token_id == "123"
         assert sample_burn_event.from_address.startswith("0x")
-
-    def test_from_thirdweb_webhook(self) -> None:
-        """Test creating from Thirdweb webhook data."""
-        timestamp = datetime.now(UTC)
-        event = NFTBurnEvent.from_thirdweb_webhook(
-            collection_id=1,
-            token_id="456",
-            from_address="0xburner",
-            transaction_hash="0xburn",
-            block_number=999,
-            timestamp=timestamp,
-        )
-
-        assert event.token_id == "456"
-        assert event.from_address == "0xburner"
 
 
 class TestNFTListingEvent:
@@ -138,19 +87,6 @@ class TestNFTListingEvent:
         )
         assert event.floor_multiple is None
 
-    def test_marketplace_normalized(self) -> None:
-        """Test marketplace name is normalized to lowercase."""
-        event = NFTListingEvent(
-            collection_id=1,
-            token_id="1",
-            seller_address="0x1234",
-            marketplace="MAGIC_EDEN",
-            price_native=Decimal("1.0"),
-            listing_id="list_1",
-            event_timestamp=datetime.now(UTC),
-        )
-        assert event.marketplace == "magic_eden"
-
 
 class TestNFTSaleEvent:
     """Tests for NFTSaleEvent model."""
@@ -170,16 +106,6 @@ class TestNFTSaleEvent:
     def test_floor_multiple(self, sample_sale_event: NFTSaleEvent) -> None:
         """Test floor multiple calculation for sales."""
         assert sample_sale_event.floor_multiple == pytest.approx(2.0)
-
-
-class TestNFTDelistingEvent:
-    """Tests for NFTDelistingEvent model."""
-
-    def test_create_delisting_event(self, sample_delisting_event: NFTDelistingEvent) -> None:
-        """Test creating a delisting event."""
-        assert sample_delisting_event.token_id == "123"
-        assert sample_delisting_event.marketplace == "magic_eden"
-        assert sample_delisting_event.original_price_native == Decimal("0.5")
 
 
 class TestZeroAddress:

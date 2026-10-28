@@ -10,7 +10,6 @@ BURN_COLOR = 0xE67E22  # Orange
 # Marketplace events
 LISTING_COLOR = 0x9B59B6  # Purple
 SALE_COLOR = 0xF1C40F  # Gold
-DELISTING_COLOR = 0x95A5A6  # Gray
 
 # Collection colors by chain (for embed sidebar)
 CHAIN_COLORS = {

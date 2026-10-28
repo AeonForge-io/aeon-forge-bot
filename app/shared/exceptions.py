@@ -1,43 +1,17 @@
-"""Custom exception hierarchy for Activity Bot."""
+"""Custom exception hierarchy for the Aeon Forge bot."""
 
 
-class ActivityBotError(Exception):
+class AeonForgeBotError(Exception):
     """Base exception for all bot errors."""
 
-    pass
 
-
-class ConfigError(ActivityBotError):
+class ConfigError(AeonForgeBotError):
     """Raised when configuration validation fails."""
 
-    pass
 
-
-class GitHubAPIError(ActivityBotError):
-    """Raised when GitHub API requests fail."""
-
-    pass
-
-
-class DiscordAPIError(ActivityBotError):
+class DiscordAPIError(AeonForgeBotError):
     """Raised when Discord API requests fail."""
 
-    pass
 
-
-class StateError(ActivityBotError):
-    """Raised when state persistence operations fail."""
-
-    pass
-
-
-class DatabaseError(ActivityBotError):
+class DatabaseError(AeonForgeBotError):
     """Raised when database operations fail."""
-
-    pass
-
-
-class GitHubPollingError(ActivityBotError):
-    """Raised when polling fails consecutively beyond threshold."""
-
-    pass

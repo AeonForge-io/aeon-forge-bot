@@ -7,7 +7,6 @@ import discord
 from app.core.logging import get_logger
 from app.discord.nft_embeds import (
     create_burn_embed,
-    create_delisting_embed,
     create_listing_embed,
     create_mint_embed,
     create_sale_embed,
@@ -15,7 +14,6 @@ from app.discord.nft_embeds import (
 )
 from app.nft.models import (
     NFTBurnEvent,
-    NFTDelistingEvent,
     NFTListingEvent,
     NFTMintEvent,
     NFTSaleEvent,
@@ -255,40 +253,3 @@ class NFTPoster:
                 exc_info=True,
             )
             raise DiscordAPIError(f"Failed to post sale: {e}") from e
-
-    async def post_delisting(
-        self,
-        event: NFTDelistingEvent,
-        collection_name: str,
-        channel_id: int,
-    ) -> None:
-        """Post delisting event to Discord.
-
-        Args:
-            event: Delisting event data
-            collection_name: Human-readable collection name
-            channel_id: Discord channel ID to post to
-        """
-        try:
-            channel = await self._get_channel(channel_id)
-            embed = create_delisting_embed(event, collection_name)
-            await channel.send(embed=embed)
-
-            logger.info(
-                "nft.post.delisting.success",
-                collection=collection_name,
-                token_id=event.token_id,
-                marketplace=event.marketplace,
-                channel_id=channel_id,
-            )
-        except DiscordAPIError:
-            raise
-        except Exception as e:
-            logger.error(
-                "nft.post.delisting.failed",
-                collection=collection_name,
-                token_id=event.token_id,
-                error=str(e),
-                exc_info=True,
-            )
-            raise DiscordAPIError(f"Failed to post delisting: {e}") from e
