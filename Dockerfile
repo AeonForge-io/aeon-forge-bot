@@ -37,6 +37,7 @@ COPY --from=builder --chown=appuser:appgroup /app/.venv /app/.venv
 
 # Copy application code
 COPY --chown=appuser:appgroup ./app ./app
+COPY --chown=appuser:appgroup ./migrations ./migrations
 
 # Create data directory with proper ownership
 RUN mkdir -p /app/data && chown appuser:appgroup /app/data

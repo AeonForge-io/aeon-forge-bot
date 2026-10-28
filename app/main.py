@@ -7,9 +7,11 @@ import sys
 from app.core.config import get_settings
 from app.core.database import DatabaseClient
 from app.core.logging import get_logger, setup_logging
+from app.core.migrations import apply_migrations
+from app.core.settings_reload import SettingsReloader
 from app.discord.bot import DiscordBot
 from app.discord.nft_poster import NFTPoster
-from app.shared.exceptions import ConfigError
+from app.shared.exceptions import ConfigError, DatabaseError
 
 logger = get_logger(__name__)
 
@@ -17,11 +19,17 @@ logger = get_logger(__name__)
 database_client: DatabaseClient | None = None
 discord_bot: DiscordBot | None = None
 nft_poster: NFTPoster | None = None
+settings_reloader: SettingsReloader | None = None
+
+
+async def on_contracts_changed(chain: str, contracts: frozenset[str]) -> None:
+    """Log a chain's new tracked-contract set; nothing subscribes to it yet."""
+    logger.info("chain.contracts.updated", chain=chain, contracts=sorted(contracts))
 
 
 async def startup() -> None:
     """Initialize application on startup."""
-    global database_client, discord_bot, nft_poster
+    global database_client, discord_bot, nft_poster, settings_reloader
 
     settings = get_settings()
 
@@ -29,8 +37,15 @@ async def startup() -> None:
 
     # Initialize database client
     database_client = DatabaseClient()
-    await database_client.__aenter__()
+    pool = (await database_client.__aenter__()).pool
     logger.info("database.client.initialized")
+
+    if pool is None:
+        raise DatabaseError("Connection pool not initialized")
+    await apply_migrations(pool)
+
+    settings_reloader = SettingsReloader(database_client, on_contracts_changed)
+    await settings_reloader.reload()
 
     # Initialize Discord bot
     discord_bot = DiscordBot(settings.discord_token)
@@ -81,9 +96,9 @@ async def main() -> None:
     try:
         await startup()
 
-        # No inbound port and nothing to poll yet: the process just stays alive
-        while True:
-            await asyncio.sleep(60)
+        if settings_reloader is None:
+            raise RuntimeError("Settings reloader not started")
+        await settings_reloader.run()
 
     except KeyboardInterrupt:
         logger.info("application.interrupted")
