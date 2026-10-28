@@ -27,6 +27,8 @@ TOTAL_SUPPLY_SELECTOR = "0x18160ddd"
 MAX_SUPPLY_SELECTOR = "0xd5abeb01"
 
 CATCH_UP_WINDOW_SECONDS = 6 * 60 * 60
+# Alchemy pay-as-you-go (the plan in the spec) takes wide eth_getLogs ranges; 2000 blocks is a
+# conservative slice. The free tier allows only 10 blocks per call and would need 10 here.
 LOG_RANGE_BLOCKS = 2000
 WEI_PER_ETH = Decimal(10**18)
 
@@ -95,15 +97,20 @@ class ChainReader:
     async def run(self) -> None:
         """Read the chain forever: reconnect with backoff, poll if websocket logs fail."""
         delay = BACKOFF_START_SECONDS
+        polling = False
         while True:
             try:
-                await self.connect_once()
+                if polling:
+                    await self._poll_forever()
+                else:
+                    await self.connect_once()
                 delay = BACKOFF_START_SECONDS
             except SubscriptionError as e:
                 if self.chain not in POLLING_FALLBACK_CHAINS:
                     raise
                 logger.warning("chain.subscription.refused", chain=self.chain, error=str(e))
-                await self._poll_forever()
+                polling = True
+                continue
             except ChainConnectionError as e:
                 logger.warning("chain.connection.lost", chain=self.chain, error=str(e))
                 delay = min(delay * 2, BACKOFF_MAX_SECONDS)
@@ -114,6 +121,10 @@ class ChainReader:
         """Catch up, then follow the subscription until it ends or the contract set changes."""
         await self._adopt_new_contracts()
         await self.sync_to(await self.rpc.block())
+        if not self.contracts:
+            # An empty address filter matches every contract, so wait for a tracked one instead
+            await self._contracts_changed.wait()
+            return
         live = asyncio.ensure_future(self._follow_subscription())
         changed = asyncio.ensure_future(self._contracts_changed.wait())
         try:

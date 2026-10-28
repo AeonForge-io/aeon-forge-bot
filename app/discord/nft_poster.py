@@ -81,8 +81,6 @@ class NFTPoster:
             collection_name: Human-readable collection name
             channel_id: Discord channel ID to post to
         """
-        if len(events) > MAX_EMBEDS_PER_MESSAGE:
-            raise ValueError(f"A message holds at most {MAX_EMBEDS_PER_MESSAGE} embeds")
         try:
             channel = await self._get_channel(channel_id)
             embeds = [create_mint_embed(event, collection_name) for event in events]

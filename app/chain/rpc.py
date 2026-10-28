@@ -10,8 +10,7 @@ from typing import Any, Protocol
 
 import aiohttp
 
-from app.core.config import get_settings
-from app.nft.metadata import ALCHEMY_NETWORKS
+from app.nft.metadata import alchemy_rpc_url
 from app.shared.exceptions import AeonForgeBotError
 
 
@@ -39,10 +38,11 @@ class AlchemyTransport:
     """Transport for one chain on Alchemy, over https and wss."""
 
     def __init__(self, chain: str) -> None:
-        network = ALCHEMY_NETWORKS[chain]
-        key = get_settings().alchemy_api_key
-        self._http_url = f"https://{network}.g.alchemy.com/v2/{key}"
-        self._ws_url = f"wss://{network}.g.alchemy.com/v2/{key}"
+        http_url = alchemy_rpc_url(chain)
+        if http_url is None:
+            raise ValueError(f"No Alchemy network for chain {chain}")
+        self._http_url = http_url
+        self._ws_url = "wss://" + http_url.removeprefix("https://")
         self._session = aiohttp.ClientSession()
 
     async def __aenter__(self) -> "AlchemyTransport":

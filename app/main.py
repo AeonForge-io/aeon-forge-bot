@@ -27,6 +27,13 @@ settings_reloader: SettingsReloader | None = None
 chain_readers: dict[str, ChainReader] = {}
 chain_tasks: dict[str, asyncio.Task[None]] = {}
 transports: AsyncExitStack = AsyncExitStack()
+reader_ended = asyncio.Event()
+
+
+def _note_reader_end(task: asyncio.Task[None]) -> None:
+    """Wake main() when any reader ends, including one started after startup."""
+    if not task.cancelled():
+        reader_ended.set()
 
 
 async def start_chain_reader(chain: str) -> None:
@@ -43,7 +50,9 @@ async def start_chain_reader(chain: str) -> None:
         fetch_token_image,
     )
     chain_readers[chain] = reader
-    chain_tasks[chain] = asyncio.create_task(reader.run())
+    task = asyncio.create_task(reader.run())
+    task.add_done_callback(_note_reader_end)
+    chain_tasks[chain] = task
     logger.info("chain.reader.started", chain=chain)
 
 
@@ -95,6 +104,7 @@ async def shutdown() -> None:
 
     for task in chain_tasks.values():
         task.cancel()
+    await asyncio.gather(*chain_tasks.values(), return_exceptions=True)
     await transports.aclose()
 
     # Close Discord bot
@@ -136,9 +146,9 @@ async def main() -> None:
             raise RuntimeError("Settings reloader not started")
         reload_task = asyncio.create_task(settings_reloader.run())
         # A failed reader or reload ends the bot instead of leaving it half-running
-        await asyncio.wait(
-            {reload_task, *chain_tasks.values()}, return_when=asyncio.FIRST_COMPLETED
-        )
+        reader_wait = asyncio.create_task(reader_ended.wait())
+        await asyncio.wait({reload_task, reader_wait}, return_when=asyncio.FIRST_COMPLETED)
+        reader_wait.cancel()
         for task in (reload_task, *chain_tasks.values()):
             if task.done():
                 task.result()

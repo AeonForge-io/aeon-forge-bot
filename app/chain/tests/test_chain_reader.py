@@ -1,5 +1,6 @@
 """Mints through the chain reader: Alchemy in, Discord messages and event status out."""
 
+import asyncio
 from dataclasses import replace
 from datetime import UTC, datetime
 
@@ -21,6 +22,7 @@ from app.chain.tests.conftest import (
     sepolia_collection,
 )
 from app.core.store import PostStatus
+from app.nft.metadata import IPFS_GATEWAY
 
 TX_A = "0x" + "a1" * 32
 TX_B = "0x" + "b2" * 32
@@ -38,6 +40,16 @@ def progress(message: list[discord.Embed]) -> list[str]:
 
 
 async def test_test_contract_mint_posts_in_test_channel_with_progress(bot: Bot) -> None:
+    bot.store.add_collection(
+        sepolia_collection(
+            collection_id="main",
+            name="Main",
+            contract_address=SECOND_CONTRACT,
+            discord_channel_id=MAIN_CHANNEL,
+        )
+    )
+    await bot.reloader.reload()
+    bot.reader.replace_contracts(bot.reloader.current.tracked_contracts["base-sepolia"])
     await start_at(bot, 100)
     bot.alchemy.head = 101
     bot.alchemy.initial_supply = 211
@@ -49,7 +61,7 @@ async def test_test_contract_mint_posts_in_test_channel_with_progress(bot: Bot) 
     [embed] = message
     assert embed_field(embed, "Progress") == "#212 of 750"
     assert embed.title.endswith("#7")
-    assert embed.image.url == "https://images.test/7.png"
+    assert embed.image.url == f"{IPFS_GATEWAY}images/7.png"  # tokenURI, then the metadata image
     assert bot.discord.messages(MAIN_CHANNEL) == []
     assert bot.mint_statuses() == [PostStatus.POSTED]
 
@@ -242,3 +254,32 @@ async def test_base_sepolia_polls_when_the_subscription_is_refused(bot: Bot) -> 
 
     assert len(bot.discord.messages(TEST_CHANNEL)) == 1
     assert bot.sleeps[0] == POLL_INTERVAL_SECONDS
+
+
+async def test_connection_failure_while_polling_reconnects_with_backoff(bot: Bot) -> None:
+    await start_at(bot, 100)
+    bot.alchemy.subscription_error = SubscriptionError("no logs subscription")
+    bot.alchemy.head = 101
+    original_sleep = bot.reader.sleep
+
+    async def sleep_and_break_the_next_poll(seconds: float) -> None:
+        if not bot.sleeps:
+            bot.alchemy.failing_requests = 1
+        await original_sleep(seconds)
+
+    bot.reader.sleep = sleep_and_break_the_next_poll
+
+    with pytest.raises(StopTest):
+        await bot.reader.run()
+
+    assert bot.sleeps == [POLL_INTERVAL_SECONDS, 2.0, POLL_INTERVAL_SECONDS]
+
+
+async def test_no_tracked_contract_opens_no_subscription(bot: Bot) -> None:
+    await start_at(bot, 100)
+    bot.reader.replace_contracts(frozenset())  # the last collection on the chain was switched off
+
+    with pytest.raises(TimeoutError):
+        await asyncio.wait_for(bot.reader.connect_once(), timeout=0.05)
+
+    assert bot.alchemy.subscription_filters == []
