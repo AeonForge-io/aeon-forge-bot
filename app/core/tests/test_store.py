@@ -187,3 +187,39 @@ async def test_set_post_status_changes_the_event_status(
             assert row is not None
             assert row["post_status"] == "posted"
             assert row["posted_at"] is not None
+
+
+async def test_pending_events_are_listed_oldest_first_and_only_while_pending(
+    store_with_collection: tuple[Store, int],
+) -> None:
+    store, cid = store_with_collection
+    later = NFTBurnEvent(
+        collection_id=cid,
+        token_id="2",
+        from_address=HOLDER,
+        transaction_hash=TX_B,
+        event_timestamp=WHEN.replace(hour=13),
+    )
+    earlier = later.model_copy(
+        update={"token_id": "1", "transaction_hash": TX_A, "event_timestamp": WHEN}
+    )
+    await store.insert_burn(later, PostStatus.PENDING)
+    earlier_id = await store.insert_burn(earlier, PostStatus.PENDING)
+    await store.insert_burn(later.model_copy(update={"token_id": "3"}), PostStatus.SKIPPED)
+    assert await store.insert_mint(mint(cid), PostStatus.PENDING) is not None
+    transfer = NFTTransferEvent(
+        collection_id=cid,
+        token_id="3",
+        from_address=HOLDER,
+        to_address=OTHER,
+        transaction_hash=TX_A,
+        event_timestamp=WHEN,
+    )
+    assert await store.insert_transfer(transfer, PostStatus.PENDING) is not None
+
+    assert [b.token_id for _, b in await store.list_pending_burns()] == ["1", "2"]
+    assert earlier_id is not None
+    await store.set_post_status(EventKind.BURN, earlier_id, PostStatus.POSTED)
+    assert [b.token_id for _, b in await store.list_pending_burns()] == ["2"]
+    assert [m.token_id for _, m in await store.list_pending_mints()] == ["1"]
+    assert [t.token_id for _, t in await store.list_pending_transfers()] == ["3"]

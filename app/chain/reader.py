@@ -15,11 +15,10 @@ from typing import Any
 from app.chain.rpc import Block, ChainConnectionError, ChainRpc, SubscriptionError, hex_to_int
 from app.core.logging import get_logger
 from app.core.settings_reload import SettingsReloader
-from app.core.store import Collection, EventKind, PostStatus, Store
-from app.discord.nft_poster import MAX_EMBEDS_PER_MESSAGE, NFTPoster
+from app.core.store import Collection, PostStatus, Store
+from app.discord.event_publisher import EventPublisher
 from app.nft.metadata import token_image_url
-from app.nft.models import ZERO_ADDRESS, NFTMintEvent
-from app.shared.exceptions import DiscordAPIError
+from app.nft.models import ZERO_ADDRESS, NFTBurnEvent, NFTMintEvent, NFTTransferEvent
 
 logger = get_logger(__name__)
 
@@ -41,29 +40,29 @@ POLLING_FALLBACK_CHAINS = frozenset({"base-sepolia"})
 POLL_INTERVAL_SECONDS = 30.0
 
 
-class MintLog:
-    """A decoded ERC-721 Transfer from the zero address."""
+class TransferLog:
+    """A decoded ERC-721 Transfer."""
 
     def __init__(self, log: dict[str, Any]) -> None:
         topics = log["topics"]
         self.contract: str = log["address"].lower()
         self.token_id = hex_to_int(topics[3])
-        self.minter = "0x" + topics[2][-40:]
+        self.sender = "0x" + topics[1][-40:]
+        self.recipient = "0x" + topics[2][-40:]
         self.tx_hash: str = log["transactionHash"]
         self.log_index = hex_to_int(log["logIndex"])
 
 
-def mint_logs(logs: list[dict[str, Any]]) -> list[MintLog]:
-    """The ERC-721 mints among the logs (4 topics, sent from the zero address)."""
-    return [
-        MintLog(log)
-        for log in logs
-        if len(log["topics"]) == 4 and "0x" + log["topics"][1][-40:] == ZERO_ADDRESS
-    ]
+def transfer_logs(logs: list[dict[str, Any]]) -> list[TransferLog]:
+    """The ERC-721 transfers among the logs (4 topics; ERC-20 Transfers have 3), in log order."""
+    return sorted(
+        (TransferLog(log) for log in logs if len(log["topics"]) == 4),
+        key=lambda transfer: transfer.log_index,
+    )
 
 
 class ChainReader:
-    """Reads one chain's tracked contracts and posts their mints."""
+    """Reads one chain's tracked contracts and posts their mints, burns and transfers."""
 
     def __init__(
         self,
@@ -71,14 +70,14 @@ class ChainReader:
         rpc: ChainRpc,
         store: Store,
         reloader: SettingsReloader,
-        poster: NFTPoster,
+        publisher: EventPublisher,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
     ) -> None:
         self.chain = chain
         self.rpc = rpc
         self.store = store
         self.reloader = reloader
-        self.poster = poster
+        self.publisher = publisher
         self.sleep = sleep
         self.contracts = reloader.current.tracked_contracts.get(chain, frozenset())
         self._next_contracts: frozenset[str] | None = None
@@ -162,7 +161,7 @@ class ChainReader:
     # ---- Catch-up and cursor ----
 
     async def sync_to(self, head: Block) -> None:
-        """Store and post the mints between the cursor and the head, then move the cursor."""
+        """Store and post the events between the cursor and the head, then move the cursor."""
         cursor = await self.store.get_cursor(self.chain)
         if cursor is None:
             await self._save_cursor(head)
@@ -193,7 +192,7 @@ class ChainReader:
                 by_block[hex_to_int(log["blockNumber"])].append(log)
             for number in sorted(by_block):
                 block = await self.rpc.block(number)
-                await self._store_block_mints(block, by_block[number])
+                await self._store_block_events(block, by_block[number])
                 await self._save_cursor(block)
         await self._save_cursor(head)
 
@@ -212,16 +211,64 @@ class ChainReader:
             self.chain, block.number, datetime.fromtimestamp(block.timestamp, UTC)
         )
 
-    # ---- Mints ----
+    # ---- Events ----
 
-    async def _store_block_mints(self, block: Block, logs: list[dict[str, Any]]) -> None:
-        by_contract: dict[str, list[MintLog]] = defaultdict(list)
-        for mint in sorted(mint_logs(logs), key=lambda m: m.log_index):
-            by_contract[mint.contract].append(mint)
-        for contract, mints in by_contract.items():
+    async def _store_block_events(self, block: Block, logs: list[dict[str, Any]]) -> None:
+        by_contract: dict[str, list[TransferLog]] = defaultdict(list)
+        for transfer in transfer_logs(logs):
+            by_contract[transfer.contract].append(transfer)
+        for contract, transfers in by_contract.items():
             collection = self._collection(contract)
-            if collection is not None:
+            if collection is None:
+                continue
+            mints = [t for t in transfers if t.sender == ZERO_ADDRESS]
+            if mints:
                 await self._store_contract_mints(block, collection, mints)
+            for transfer in transfers:
+                if transfer.recipient == ZERO_ADDRESS:
+                    await self._store_burn(block, collection, transfer)
+                elif transfer.sender != ZERO_ADDRESS:
+                    await self._store_transfer(block, collection, transfer)
+
+    async def _store_burn(self, block: Block, collection: Collection, burn: TransferLog) -> None:
+        event = NFTBurnEvent(
+            collection_id=collection.id,
+            token_id=str(burn.token_id),
+            from_address=burn.sender,
+            chain=self.chain,
+            token_image_url=token_image_url(collection, str(burn.token_id)),
+            transaction_hash=burn.tx_hash,
+            block_number=block.number,
+            event_timestamp=datetime.fromtimestamp(block.timestamp, UTC),
+        )
+        status = PostStatus.PENDING if collection.post_burns else PostStatus.SKIPPED
+        event_id = await self.store.insert_burn(event, status)
+        if event_id is not None and status is PostStatus.PENDING:
+            await self.publisher.post_burn(collection, event_id, event)
+
+    async def _store_transfer(
+        self, block: Block, collection: Collection, transfer: TransferLog
+    ) -> None:
+        """Record a transfer; the mode decides whether it is posted or kept as skipped."""
+        is_company = self.reloader.current.company_label(transfer.sender) is not None
+        posts = collection.transfer_mode == "all" or (
+            collection.transfer_mode == "company" and is_company
+        )
+        status = PostStatus.PENDING if posts else PostStatus.SKIPPED
+        event = NFTTransferEvent(
+            collection_id=collection.id,
+            token_id=str(transfer.token_id),
+            from_address=transfer.sender,
+            to_address=transfer.recipient,
+            chain=self.chain,
+            token_image_url=token_image_url(collection, str(transfer.token_id)),
+            transaction_hash=transfer.tx_hash,
+            block_number=block.number,
+            event_timestamp=datetime.fromtimestamp(block.timestamp, UTC),
+        )
+        event_id = await self.store.insert_transfer(event, status)
+        if event_id is not None and status is PostStatus.PENDING:
+            await self.publisher.post_transfer(collection, event_id, event)
 
     def _collection(self, contract: str) -> Collection | None:
         for collection in self.reloader.current.collections:
@@ -235,9 +282,9 @@ class ChainReader:
         return None
 
     async def _store_contract_mints(
-        self, block: Block, collection: Collection, mints: list[MintLog]
+        self, block: Block, collection: Collection, mints: list[TransferLog]
     ) -> None:
-        """Record a contract's mints in one block; post the new ones, one message per 10."""
+        """Record a contract's mints in one block and post the new ones."""
         supply = await self.rpc.call_uint(
             collection.contract_address, TOTAL_SUPPLY_SELECTOR, block.number
         )
@@ -253,13 +300,13 @@ class ChainReader:
             price_per_token[tx_hash] = value / count if value > 0 else None
 
         status = PostStatus.PENDING if collection.post_mints else PostStatus.SKIPPED
-        new_per_tx: dict[str, list[tuple[int, NFTMintEvent]]] = defaultdict(list)
+        new_mints: list[tuple[int, NFTMintEvent]] = []
         for position, mint in enumerate(mints):
             later_mints = len(mints) - 1 - position
             event = NFTMintEvent(
                 collection_id=collection.id,
                 token_id=str(mint.token_id),
-                to_address=mint.minter,
+                to_address=mint.recipient,
                 chain=self.chain,
                 token_image_url=token_image_url(collection, str(mint.token_id)),
                 price_native=price_per_token[mint.tx_hash],
@@ -271,26 +318,6 @@ class ChainReader:
             )
             event_id = await self.store.insert_mint(event, status)
             if event_id is not None and status is PostStatus.PENDING:
-                new_per_tx[mint.tx_hash].append((event_id, event))
-        for recorded in new_per_tx.values():
-            for first in range(0, len(recorded), MAX_EMBEDS_PER_MESSAGE):
-                await self._post_mints(collection, recorded[first : first + MAX_EMBEDS_PER_MESSAGE])
-
-    async def _post_mints(
-        self, collection: Collection, recorded: list[tuple[int, NFTMintEvent]]
-    ) -> None:
-        try:
-            await self.poster.post_mints(
-                [event for _, event in recorded],
-                collection.name,
-                collection.discord_channel_id,
-                collection.mint_url,
-            )
-        except DiscordAPIError as e:
-            # Stays pending; the retry loop (a later card) picks it up
-            logger.error(
-                "chain.mint.post_failed", collection=collection.collection_id, error=str(e)
-            )
-            return
-        for event_id, _ in recorded:
-            await self.store.set_post_status(EventKind.MINT, event_id, PostStatus.POSTED)
+                new_mints.append((event_id, event))
+        if new_mints:
+            await self.publisher.post_mints(collection, new_mints)

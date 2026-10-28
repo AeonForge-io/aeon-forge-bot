@@ -115,12 +115,12 @@ async def test_transfer_card_from_aeon_forge_has_browse_and_no_mint_button() -> 
         transaction_hash=TX_HASH,
         event_timestamp=NOW,
     )
-    card = Card(create_transfer_card(event, "DragonZ", CONTRACT))
+    card = Card(create_transfer_card(event, "DragonZ", CONTRACT, "Treasury"))
 
     assert card.accent == TRANSFER_COLOR
     assert card.images == [IMAGE]
     assert "DragonZ #42" in card.text
-    assert card.values("From") == ["Aeon Forge"]
+    assert card.values("From") == ["Aeon Forge (Treasury)"]
     assert card.buttons == [("Transaction", TX_URL), ("Browse Forum One", BROWSE_URL)]
 
 

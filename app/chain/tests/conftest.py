@@ -2,6 +2,7 @@
 
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
@@ -18,6 +19,7 @@ from app.chain.rpc import ChainConnectionError, ChainRpc, SubscriptionError
 from app.core.memory_store import MemoryStore
 from app.core.settings_reload import SettingsReloader
 from app.core.store import Collection, EventKind, PostStatus
+from app.discord.event_publisher import EventPublisher
 from app.discord.nft_poster import NFTPoster
 from app.discord.tests.card_view import Card
 from app.nft.models import ZERO_ADDRESS
@@ -146,6 +148,15 @@ class FakeDiscord:
         return self.sent.get(channel_id, [])
 
 
+def transfer_log(
+    contract: str, token_id: int, block: int, tx: str, log_index: int, sender: str, recipient: str
+) -> dict[str, Any]:
+    """An ERC-721 Transfer between two addresses, as eth_getLogs returns it."""
+    log = mint_log(contract, token_id, block, tx, log_index, minter=recipient)
+    log["topics"][1] = _topic_address(sender)
+    return log
+
+
 def sepolia_collection(**overrides: Any) -> Collection:
     values: dict[str, Any] = {
         "id": 0,
@@ -160,6 +171,16 @@ def sepolia_collection(**overrides: Any) -> Collection:
 
 
 @dataclass
+class Clock:
+    """The publisher's clock, moved by tests."""
+
+    current: datetime
+
+    def now(self) -> datetime:
+        return self.current
+
+
+@dataclass
 class Bot:
     """Everything a test drives: the reader (entry point) and what it can observe."""
 
@@ -169,6 +190,8 @@ class Bot:
     store: MemoryStore
     reloader: SettingsReloader
     sleeps: list[float]
+    publisher: EventPublisher
+    clock: "Clock"
 
     def mint_statuses(self) -> list[PostStatus]:
         return [stored.status for stored in self.store.events[EventKind.MINT]]
@@ -193,12 +216,19 @@ async def bot(monkeypatch: pytest.MonkeyPatch) -> Bot:
         if len(sleeps) >= 3:
             raise StopTest
 
+    clock = Clock(datetime.fromtimestamp(block_time(100), UTC))
+    publisher = EventPublisher(
+        store,
+        reloader,
+        NFTPoster(fake_discord),  # type: ignore[arg-type]  # FakeDiscord has the bot's client
+        clock.now,
+    )
     reader = ChainReader(
         "base-sepolia",
         ChainRpc(alchemy),
         store,
         reloader,
-        NFTPoster(fake_discord),  # type: ignore[arg-type]  # FakeDiscord has the bot's client
+        publisher,
         sleep=record_sleep,
     )
-    return Bot(reader, alchemy, fake_discord, store, reloader, sleeps)
+    return Bot(reader, alchemy, fake_discord, store, reloader, sleeps, publisher, clock)

@@ -53,7 +53,7 @@ def wired(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(main, "ChainRpc", lambda transport: transport)
     monkeypatch.setattr(main, "settings_reloader", SimpleNamespace())
     monkeypatch.setattr(main, "database_client", SimpleNamespace())
-    monkeypatch.setattr(main, "nft_poster", SimpleNamespace())
+    monkeypatch.setattr(main, "event_publisher", SimpleNamespace())
     monkeypatch.setattr(main, "chain_readers", {})
     monkeypatch.setattr(main, "chain_tasks", {})
     monkeypatch.setattr(main, "reader_ended", asyncio.Event())
@@ -140,7 +140,10 @@ async def test_sigterm_shuts_down_and_main_returns(monkeypatch: pytest.MonkeyPat
     shut_down: list[bool] = []
 
     async def fake_startup() -> None:
-        monkeypatch.setattr(main, "settings_reloader", SimpleNamespace(run=asyncio.Event().wait))
+        monkeypatch.setattr(
+            main, "settings_reloader", SimpleNamespace(run=lambda **_: asyncio.Event().wait())
+        )
+        monkeypatch.setattr(main, "event_publisher", SimpleNamespace(retry_pending=None))
         os.kill(os.getpid(), signal.SIGTERM)
 
     async def fake_shutdown() -> None:

@@ -73,8 +73,17 @@ class SettingsReloader:
                 await self.on_contracts_changed(chain, new)
         return self.current
 
-    async def run(self, interval: float = RELOAD_INTERVAL_SECONDS) -> None:
-        """Reload forever; a failed reload raises, so a broken settings read stops the bot."""
+    async def run(
+        self,
+        interval: float = RELOAD_INTERVAL_SECONDS,
+        after_reload: Callable[[], Awaitable[None]] | None = None,
+    ) -> None:
+        """Reload forever, then run after_reload (the pending-post retry) in the same loop.
+
+        A failed reload or retry raises, so a broken database stops the bot.
+        """
         while True:
             await asyncio.sleep(interval)
             await self.reload()
+            if after_reload is not None:
+                await after_reload()
