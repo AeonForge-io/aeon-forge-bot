@@ -143,6 +143,17 @@ class MemoryStore:
     async def insert_listing(self, event: NFTListingEvent, status: PostStatus) -> int | None:
         return self._insert(EventKind.LISTING, event, status)
 
+    async def list_pending_mints(self) -> list[tuple[int, NFTMintEvent]]:
+        return [(i, e) for i, e in self._pending(EventKind.MINT) if isinstance(e, NFTMintEvent)]
+
+    async def list_pending_transfers(self) -> list[tuple[int, NFTTransferEvent]]:
+        return [
+            (i, e) for i, e in self._pending(EventKind.TRANSFER) if isinstance(e, NFTTransferEvent)
+        ]
+
+    async def list_pending_burns(self) -> list[tuple[int, NFTBurnEvent]]:
+        return [(i, e) for i, e in self._pending(EventKind.BURN) if isinstance(e, NFTBurnEvent)]
+
     async def set_post_status(self, kind: EventKind, event_id: int, status: PostStatus) -> None:
         for stored in self.events[kind]:
             if stored.id == event_id:
@@ -161,6 +172,9 @@ class MemoryStore:
         next_id = self._next_id
         self._next_id += 1
         return next_id
+
+    def _pending(self, kind: EventKind) -> list[tuple[int, BaseModel]]:
+        return [(s.id, s.event) for s in self.events[kind] if s.status is PostStatus.PENDING]
 
     def _insert(self, kind: EventKind, event: BaseModel, status: PostStatus) -> int | None:
         for key in UNIQUE_KEYS[kind]:

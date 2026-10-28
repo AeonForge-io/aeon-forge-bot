@@ -111,6 +111,7 @@ class NFTPoster:
         collection_name: str,
         channel_id: int,
         contract_address: str,
+        from_label: str | None,
     ) -> None:
         """Post transfer event to Discord.
 
@@ -119,10 +120,13 @@ class NFTPoster:
             collection_name: Human-readable collection name
             channel_id: Discord channel ID to post to
             contract_address: NFT contract address (for the Forum One link)
+            from_label: Company wallet label of the sender, None for any other sender
         """
         try:
             channel = await self._get_channel(channel_id)
-            await channel.send(view=create_transfer_card(event, collection_name, contract_address))
+            await channel.send(
+                view=create_transfer_card(event, collection_name, contract_address, from_label)
+            )
 
             logger.info(
                 "nft.post.transfer.success",

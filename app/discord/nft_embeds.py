@@ -219,14 +219,20 @@ def _progress_bar(number: int, max_supply: int) -> str:
 
 
 def create_transfer_card(
-    event: NFTTransferEvent, collection_name: str, contract_address: str
+    event: NFTTransferEvent,
+    collection_name: str,
+    contract_address: str,
+    from_label: str | None,
 ) -> ui.LayoutView:
-    """Create the card for a transfer sent from an Aeon Forge wallet."""
+    """Create the card for a transfer; from_label is the company wallet label of the sender."""
     section = (
         f"{collection_name} #{event.token_id}",
         f"sent on {CHAIN_NAMES[event.chain]}",
         event.token_image_url,
-        _lines(("From", "Aeon Forge"), ("To", event.short_to_address)),
+        _lines(
+            ("From", f"Aeon Forge ({from_label})" if from_label else event.short_from_address),
+            ("To", event.short_to_address),
+        ),
     )
     buttons = _transaction_button(event.chain, event.transaction_hash) + _browse_button(
         event.chain, contract_address

@@ -323,6 +323,27 @@ class DatabaseClient:
             status.value,
         )
 
+    async def _pending(self, name: str, kind: EventKind) -> list[Any]:
+        # kind is an EventKind member, never user input, so naming the table is safe
+        query = f"""
+            SELECT * FROM {kind.value}
+            WHERE post_status = 'pending'
+            ORDER BY event_timestamp, id
+        """  # noqa: S608
+        return await self._run(name, lambda conn: conn.fetch(query))
+
+    async def list_pending_mints(self) -> list[tuple[int, NFTMintEvent]]:
+        rows = await self._pending("list_pending_mints", EventKind.MINT)
+        return [(r["id"], NFTMintEvent.model_validate(dict(r))) for r in rows]
+
+    async def list_pending_transfers(self) -> list[tuple[int, NFTTransferEvent]]:
+        rows = await self._pending("list_pending_transfers", EventKind.TRANSFER)
+        return [(r["id"], NFTTransferEvent.model_validate(dict(r))) for r in rows]
+
+    async def list_pending_burns(self) -> list[tuple[int, NFTBurnEvent]]:
+        rows = await self._pending("list_pending_burns", EventKind.BURN)
+        return [(r["id"], NFTBurnEvent.model_validate(dict(r))) for r in rows]
+
     async def set_post_status(self, kind: EventKind, event_id: int, status: PostStatus) -> None:
         # kind is an EventKind member, never user input, so naming the table is safe
         query = f"""
