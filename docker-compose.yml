@@ -16,10 +16,10 @@ services:
       - ./migrations:/app/migrations:ro
       - ./data:/app/data
     healthcheck:
-      test: ["CMD", "python", "-c", "import sys; sys.exit(0)"]
+      test: ["CMD", "python", "-c", "import os,sys,time; sys.exit(0 if time.time()-os.path.getmtime('/app/data/heartbeat')<180 else 1)"]
       interval: 30s
       timeout: 3s
-      start_period: 10s
+      start_period: 90s
       retries: 3
     restart: unless-stopped
     deploy:

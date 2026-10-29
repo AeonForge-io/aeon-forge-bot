@@ -2,6 +2,7 @@
 
 import asyncio
 from dataclasses import replace
+from pathlib import Path
 
 import pytest
 
@@ -110,6 +111,38 @@ async def test_run_fails_loudly_when_a_reload_fails() -> None:
     reloader = SettingsReloader(Broken(), Signals())
     with pytest.raises(DatabaseError):
         await reloader.run(interval=0.01)
+
+
+async def test_run_writes_the_heartbeat_after_a_reload(tmp_path: Path) -> None:
+    beat = tmp_path / "heartbeat"
+    reloader = SettingsReloader(MemoryStore(), Signals())
+    task = asyncio.create_task(reloader.run(interval=0.01, heartbeat_path=beat))
+    await asyncio.sleep(0.1)
+    task.cancel()
+    assert beat.exists()
+
+
+async def test_heartbeat_is_not_written_when_a_reader_is_dead(tmp_path: Path) -> None:
+    beat = tmp_path / "heartbeat"
+    reloader = SettingsReloader(MemoryStore(), Signals())
+    task = asyncio.create_task(
+        reloader.run(interval=0.01, heartbeat_path=beat, readers_alive=lambda: False)
+    )
+    await asyncio.sleep(0.1)
+    task.cancel()
+    assert not beat.exists()
+
+
+async def test_heartbeat_is_not_refreshed_after_a_failed_reload(tmp_path: Path) -> None:
+    class Broken(MemoryStore):
+        async def list_collections(self) -> list:  # type: ignore[type-arg]
+            raise DatabaseError("connection lost")
+
+    beat = tmp_path / "heartbeat"
+    reloader = SettingsReloader(Broken(), Signals())
+    with pytest.raises(DatabaseError):
+        await reloader.run(interval=0.01, heartbeat_path=beat)
+    assert not beat.exists()
 
 
 def test_memory_store_refuses_what_the_schema_refuses() -> None:

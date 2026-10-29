@@ -8,6 +8,7 @@ can be replaced.
 import asyncio
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from app.core.logging import get_logger
 from app.core.store import Collection, CompanyWallet, MarketplaceMark, Store
@@ -15,6 +16,7 @@ from app.core.store import Collection, CompanyWallet, MarketplaceMark, Store
 logger = get_logger(__name__)
 
 RELOAD_INTERVAL_SECONDS = 60
+HEARTBEAT_PATH = Path("/app/data/heartbeat")
 
 ContractsChanged = Callable[[str, frozenset[str]], Awaitable[None]]
 
@@ -77,13 +79,19 @@ class SettingsReloader:
         self,
         interval: float = RELOAD_INTERVAL_SECONDS,
         after_reload: Callable[[], Awaitable[None]] | None = None,
+        heartbeat_path: Path = HEARTBEAT_PATH,
+        readers_alive: Callable[[], bool] = lambda: True,
     ) -> None:
         """Reload forever, then run after_reload (the pending-post retry) in the same loop.
 
-        A failed reload or retry raises, so a broken database stops the bot.
+        A failed reload or retry raises, so a broken database stops the bot. After each
+        successful pass the heartbeat file is touched (the container healthcheck reads its
+        age), unless readers_alive reports a chain reader that is no longer running.
         """
         while True:
             await asyncio.sleep(interval)
             await self.reload()
             if after_reload is not None:
                 await after_reload()
+            if readers_alive():
+                heartbeat_path.touch()

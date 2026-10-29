@@ -151,7 +151,10 @@ async def main() -> None:
         if forum_one_poller is None:
             raise RuntimeError("Forum One poller not started")
         reload_task = asyncio.create_task(
-            settings_reloader.run(after_reload=event_publisher.retry_pending)
+            settings_reloader.run(
+                after_reload=event_publisher.retry_pending,
+                readers_alive=lambda: all(not t.done() for t in chain_tasks.values()),
+            )
         )
         poll_task = asyncio.create_task(forum_one_poller.run())
         # A failed reader or reload ends the bot instead of leaving it half-running
