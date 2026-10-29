@@ -12,6 +12,7 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any, TypeVar
 
+from app.chain.abi import TRANSFER_TOPIC
 from app.chain.element import element_sales
 from app.chain.forum_one import ForumOneSale, forum_one_sales
 from app.chain.rarible import rarible_sale
@@ -38,7 +39,6 @@ _SaleT = TypeVar("_SaleT", ForumOneSale, SeaportSale)
 
 ELEMENT_MARKETPLACE = "Element"
 RARIBLE_MARKETPLACE = "Rarible"
-ERC721_TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
 TOTAL_SUPPLY_SELECTOR = "0x18160ddd"
 MAX_SUPPLY_SELECTOR = "0xd5abeb01"
 
@@ -149,7 +149,7 @@ class ChainReader:
             live.result()
 
     async def _follow_subscription(self) -> None:
-        log_filter = {"address": sorted(self.contracts), "topics": [ERC721_TRANSFER_TOPIC]}
+        log_filter = {"address": sorted(self.contracts), "topics": [TRANSFER_TOPIC]}
         async for log in self.rpc.transport.subscribe_logs(log_filter):
             if log.get("removed"):
                 logger.info("chain.log.removed", chain=self.chain, tx=log["transactionHash"])
@@ -200,7 +200,7 @@ class ChainReader:
             return
         for low in range(start, head.number + 1, LOG_RANGE_BLOCKS):
             high = min(low + LOG_RANGE_BLOCKS - 1, head.number)
-            logs = await self.rpc.logs(low, high, sorted(self.contracts), [ERC721_TRANSFER_TOPIC])
+            logs = await self.rpc.logs(low, high, sorted(self.contracts), [TRANSFER_TOPIC])
             by_block: dict[int, list[dict[str, Any]]] = defaultdict(list)
             for log in logs:
                 if log.get("removed"):
@@ -376,6 +376,7 @@ class ChainReader:
             transfer.token_id,
             transfer.sender,
             transfer.recipient,
+            transfer.log_index,
         )
 
     async def _seaport_sale(

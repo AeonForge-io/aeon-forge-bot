@@ -9,8 +9,8 @@ from unittest.mock import AsyncMock, MagicMock
 import discord
 import pytest
 
+from app.chain.abi import TRANSFER_TOPIC
 from app.chain.reader import (
-    ERC721_TRANSFER_TOPIC,
     MAX_SUPPLY_SELECTOR,
     TOTAL_SUPPLY_SELECTOR,
     ChainReader,
@@ -54,7 +54,7 @@ def mint_log(
     return {
         "address": contract,
         "topics": [
-            ERC721_TRANSFER_TOPIC,
+            TRANSFER_TOPIC,
             _topic_address(ZERO_ADDRESS),
             _topic_address(minter),
             f"0x{token_id:064x}",

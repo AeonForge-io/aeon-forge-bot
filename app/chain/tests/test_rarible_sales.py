@@ -6,6 +6,7 @@ from typing import Any
 
 import pytest
 
+from app.chain.abi import TRANSFER_TOPIC
 from app.chain.rarible import EXCHANGE_META_V2, MATCH_TOPIC
 from app.chain.tests.conftest import (
     MAIN_CHANNEL,
@@ -28,17 +29,18 @@ from app.chain.tests.test_forum_one_sales import (
 from app.core.store import EventKind, PostStatus
 
 WETH = "0x4200000000000000000000000000000000000006"
-ERC20_TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
 CANCEL_TOPIC = "0xe8d9861dbc9c664c3a2ef9bb3a1ec3f3a9a2e2b0b8d6a1e7a7ec7ef1b1e0f3c1"
 
 
-def match_log(left_fill: int, right_fill: int, address: str = EXCHANGE_META_V2) -> dict[str, Any]:
+def match_log(
+    left_fill: int, right_fill: int, address: str = EXCHANGE_META_V2, log_index: int = 9
+) -> dict[str, Any]:
     """A Match as a receipt holds it: four data words, nothing indexed."""
     return {
         "address": address,
         "topics": [MATCH_TOPIC],
         "data": "0x" + word(0x11) + word(0x22) + word(left_fill) + word(right_fill),
-        "logIndex": "0x9",
+        "logIndex": hex(log_index),
     }
 
 
@@ -46,7 +48,7 @@ def payout_log(coin: str, to: str, amount: int) -> dict[str, Any]:
     """An ERC-20 Transfer: 3 topics, the amount in data."""
     return {
         "address": coin,
-        "topics": [ERC20_TRANSFER_TOPIC, "0x" + address_word(BUYER), "0x" + address_word(to)],
+        "topics": [TRANSFER_TOPIC, "0x" + address_word(BUYER), "0x" + address_word(to)],
         "data": "0x" + word(amount),
         "logIndex": "0x8",
     }
@@ -82,6 +84,31 @@ async def test_a_match_with_weth_payouts_posts_one_rarible_sale(base_bot: Bot) -
     assert card.values("Buyer") == ["0x0000...00b2"]
     assert card.buttons[0] == ("Transaction", f"https://basescan.org/tx/{TX_A}")
     assert [s.status for s in base_bot.store.events[EventKind.TRANSFER]] == [PostStatus.SKIPPED]
+
+
+async def test_each_transfer_takes_the_price_of_its_own_match(base_bot: Bot) -> None:
+    base_bot.alchemy.receipts[TX_A] = [
+        match_log(1, 10**14, log_index=3),
+        match_log(1, 3 * 10**14, log_index=7),
+    ]
+    base_bot.alchemy.logs = [
+        transfer_log(DRAGONZ, 5, 101, TX_A, 1, SELLER, BUYER),
+        transfer_log(DRAGONZ, 6, 101, TX_A, 5, SELLER, BUYER),
+    ]
+
+    await base_bot.reader.connect_once()
+
+    prices = sorted(card.values("Price")[0] for card in base_bot.discord.messages(MAIN_CHANNEL))
+    assert prices == ["0.0001 ETH", "0.0003 ETH"]
+
+
+async def test_a_transfer_after_the_last_match_is_not_a_rarible_sale(base_bot: Bot) -> None:
+    base_bot.alchemy.receipts[TX_A] = [match_log(1, 10**14, log_index=3)]
+    base_bot.alchemy.logs = [transfer_log(DRAGONZ, 5, 101, TX_A, 5, SELLER, BUYER)]
+
+    await base_bot.reader.connect_once()
+
+    assert base_bot.store.events[EventKind.SALE] == []
 
 
 async def test_a_match_without_an_erc20_payout_is_priced_in_eth(base_bot: Bot) -> None:
