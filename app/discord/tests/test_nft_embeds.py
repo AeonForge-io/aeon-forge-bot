@@ -218,3 +218,21 @@ async def test_test_chain_posts_have_no_forum_one_button() -> None:
 
     assert [label for label, _ in card.buttons] == ["Transaction"]
     assert card.buttons[0][1] == f"https://sepolia.basescan.org/tx/{TX_HASH}"
+
+
+async def test_price_shows_up_to_six_decimals_and_drops_trailing_zeros() -> None:
+    def price_of(value: str) -> list[str]:
+        event = NFTListingEvent(
+            collection_id=1,
+            token_id="42",
+            seller_address=ADDRESS,
+            marketplace="forum_one",
+            price_native=Decimal(value),
+            listing_id="0xorder",
+            event_timestamp=NOW,
+        )
+        return Card(create_listing_card(event, "DragonZ", "base", CONTRACT)).values("Price")
+
+    assert price_of("0.00025") == ["0.00025 ETH"]
+    assert price_of("0.1234567") == ["0.123457 ETH"]
+    assert price_of("2.000000") == ["2 ETH"]

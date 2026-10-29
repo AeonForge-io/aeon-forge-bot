@@ -1,10 +1,10 @@
 """Decoding Element's ElementEx fill events out of a transaction receipt."""
 
-from dataclasses import dataclass
 from typing import Any
 
 from app.chain.abi import address
 from app.chain.abi import words as abi_words
+from app.chain.forum_one import ForumOneSale
 from app.nft.models import ZERO_ADDRESS
 
 ELEMENT_EX = "0xa39a5f160a1952ddf38781bd76e402b0006912a9"
@@ -30,19 +30,7 @@ OFFER_ACCEPTED_TOPICS = frozenset(
 MAKER_WORD, TAKER_WORD, COIN_WORD, AMOUNT_WORD, NFT_WORD, TOKEN_ID_WORD = 1, 2, 4, 5, 7, 8
 
 
-@dataclass(frozen=True)
-class ElementSale:
-    """One token sold through ElementEx; the currency is an address (zero is ETH)."""
-
-    asset_contract: str
-    token_id: int
-    seller: str
-    buyer: str
-    total_price: int
-    currency: str
-
-
-def element_sales(receipt_logs: list[dict[str, Any]]) -> list[ElementSale]:
+def element_sales(receipt_logs: list[dict[str, Any]]) -> list[ForumOneSale]:
     """The sales among a receipt's logs, from ElementEx's own fill events only."""
     sales = []
     for log in receipt_logs:
@@ -56,7 +44,7 @@ def element_sales(receipt_logs: list[dict[str, Any]]) -> list[ElementSale]:
         maker, taker = address(data[MAKER_WORD]), address(data[TAKER_WORD])
         coin = address(data[COIN_WORD])
         sales.append(
-            ElementSale(
+            ForumOneSale(
                 asset_contract=address(data[NFT_WORD]),
                 token_id=data[TOKEN_ID_WORD],
                 seller=maker if is_listing else taker,
