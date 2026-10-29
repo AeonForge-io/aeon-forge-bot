@@ -284,7 +284,10 @@ def create_sale_card(
         _lines(
             ("Seller", event.short_seller_address),
             ("Buyer", event.short_buyer_address),
-            ("Price", _format_price(event.price_native, event.price_usd, event.currency)),
+            (
+                "Seller received" if event.seller_received else "Price",
+                _format_price(event.price_native, event.price_usd, event.currency),
+            ),
             ("Marketplace", _format_marketplace(event.marketplace)),
             ("Rarity", f"#{event.rarity_rank}" if event.rarity_rank else None),
         ),

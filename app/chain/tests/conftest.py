@@ -90,6 +90,9 @@ class FakeAlchemy:
     receipts: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
     erc20s: dict[str, tuple[str, int]] = field(default_factory=dict)
     tx_inputs: dict[str, str] = field(default_factory=dict)
+    tx_senders: dict[str, str] = field(default_factory=dict)
+    tx_targets: dict[str, str] = field(default_factory=dict)
+    traces: dict[str, dict[str, Any]] = field(default_factory=dict)
     initial_supply: int = 0
     max_supply: int = 750
     notifications: list[dict[str, Any]] = field(default_factory=list)
@@ -137,10 +140,22 @@ class FakeAlchemy:
                 "hash": params[0],
                 "value": hex(self.tx_values_wei.get(params[0], 0)),
                 "input": self.tx_inputs.get(params[0], "0x"),
+                "from": self.tx_senders.get(params[0], ZERO_ADDRESS),
+                "to": self.tx_targets.get(params[0], ZERO_ADDRESS),
             }
+        if method == "debug_traceTransaction":
+            assert params[1] == {"tracer": "callTracer"}
+            return self.traces.get(
+                params[0], {"from": ZERO_ADDRESS, "to": ZERO_ADDRESS, "value": "0x0"}
+            )
         if method == "eth_getTransactionReceipt":
             self.receipt_requests.append(params[0])
-            return {"transactionHash": params[0], "logs": self.receipts.get(params[0], [])}
+            # A receipt holds the tx's tracked Transfer logs as well as the scripted ones
+            transfers = [log for log in self.logs if log["transactionHash"] == params[0]]
+            return {
+                "transactionHash": params[0],
+                "logs": [*self.receipts.get(params[0], []), *transfers],
+            }
         raise AssertionError(f"unexpected RPC {method}")
 
     async def subscribe_logs(self, log_filter: dict[str, Any]) -> AsyncIterator[dict[str, Any]]:

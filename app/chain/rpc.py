@@ -111,6 +111,15 @@ class Block:
     timestamp: int
 
 
+@dataclass(frozen=True)
+class Transaction:
+    """The parts of a transaction the fallback sale check reads; to is None for a deployment."""
+
+    sender: str
+    to: str | None
+    value_wei: int
+
+
 def hex_to_int(value: str) -> int:
     """Decode a 0x quantity."""
     return int(value, 16)
@@ -157,6 +166,19 @@ class ChainRpc:
         """The ETH value (wei) sent with a transaction."""
         tx = await self.transport.request("eth_getTransactionByHash", [tx_hash])
         return hex_to_int(tx["value"])
+
+    async def transaction(self, tx_hash: str) -> Transaction:
+        """A transaction's sender, target and ETH value."""
+        tx = await self.transport.request("eth_getTransactionByHash", [tx_hash])
+        to = tx["to"]
+        return Transaction(tx["from"].lower(), to.lower() if to else None, hex_to_int(tx["value"]))
+
+    async def call_trace(self, tx_hash: str) -> dict[str, Any]:
+        """A transaction's call tree from Alchemy's callTracer, internal ETH transfers included."""
+        trace: dict[str, Any] = await self.transport.request(
+            "debug_traceTransaction", [tx_hash, {"tracer": "callTracer"}]
+        )
+        return trace
 
     async def transaction_input(self, tx_hash: str) -> str:
         """The calldata (0x hex) a transaction was sent with."""
