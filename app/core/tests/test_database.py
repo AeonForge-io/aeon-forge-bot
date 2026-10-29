@@ -18,7 +18,7 @@ def mock_settings() -> Generator[MagicMock, None, None]:
     settings.db_port = 5432
     settings.db_name = "test_db"
     settings.db_user = "test_user"
-    settings.db_password = "test_password"  # noqa: S105
+    settings.db_password = "test_password"
     yield settings
 
 
@@ -36,48 +36,6 @@ async def test_database_client_context_manager_lifecycle(mock_settings):
                 mock_create_pool.assert_called_once()
 
             mock_pool.close.assert_called_once()
-
-
-@pytest.mark.asyncio
-async def test_fetch_all_quotes_success(mock_settings):
-    """Test that fetch_all_quotes returns formatted quote tuples."""
-    with patch("app.core.database.get_settings", return_value=mock_settings):
-        with patch("asyncpg.create_pool", new_callable=AsyncMock) as mock_create_pool:
-            mock_pool = MagicMock()
-            mock_conn = AsyncMock()
-
-            # Create async context manager for acquire()
-            async_acquire = AsyncMock()
-            async_acquire.__aenter__.return_value = mock_conn
-            async_acquire.__aexit__.return_value = None
-            mock_pool.acquire.return_value = async_acquire
-
-            mock_rows = [
-                {"text": "Quote 1", "author": "Author 1"},
-                {"text": "Quote 2", "author": "Author 2"},
-                {"text": "Quote 3", "author": ""},
-            ]
-            mock_conn.fetch.return_value = mock_rows
-            mock_pool.close = AsyncMock()
-            mock_create_pool.return_value = mock_pool
-
-            db = DatabaseClient()
-            async with db:
-                quotes = await db.fetch_all_quotes()
-
-            assert len(quotes) == 3
-            assert quotes[0] == ("Quote 1", "Author 1")
-            assert quotes[1] == ("Quote 2", "Author 2")
-            assert quotes[2] == ("Quote 3", "")
-
-
-@pytest.mark.asyncio
-async def test_fetch_all_quotes_no_pool_raises():
-    """Test that fetch_all_quotes raises DatabaseError when pool is None."""
-    db = DatabaseClient()
-
-    with pytest.raises(DatabaseError, match="Connection pool not initialized"):
-        await db.fetch_all_quotes()
 
 
 @pytest.mark.asyncio

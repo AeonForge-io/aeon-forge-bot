@@ -1,0 +1,26 @@
+"""Removal check: the app carries no GitHub, stats, Thirdweb or Magic Eden code."""
+
+import importlib.util
+
+import pytest
+
+REMOVED_MODULES = [
+    "app.github",
+    "app.stats",
+    "app.core.state",
+    "app.shared.models",
+    "app.discord.poster",
+    "app.discord.commands",
+    "app.discord.quotes",
+    "app.discord.summary_scheduler",
+    "app.nft.config",
+    "app.nft.thirdweb",
+    "app.nft.webhook_server",
+    "app.nft.marketplaces",
+]
+
+
+@pytest.mark.parametrize("module", REMOVED_MODULES)
+def test_removed_module_is_gone(module: str) -> None:
+    """Each removed module no longer exists."""
+    assert importlib.util.find_spec(module) is None

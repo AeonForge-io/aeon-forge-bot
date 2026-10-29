@@ -1,1 +1,0 @@
-"""Thirdweb Insight webhook integration."""

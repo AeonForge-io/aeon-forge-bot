@@ -1,0 +1,35 @@
+-- Marks that name Seaport sales, each sourced for Base or chain-independent (calldata tags).
+-- Magic Eden's fee wallet 0xca9337244b5f04cb946391bc8b8a980e988f9a6a is left out:
+-- Magic Eden's EVM marketplace has closed (Staxed, 2026-10-28).
+
+INSERT INTO marketplace_marks (kind, value, marketplace, note) VALUES
+    ('fee_wallet', '0x0000a26b00c1f0df003000390027140000faa719', 'OpenSea',
+     'On-chain scan of Seaport 1.6 OrderFulfilled on Base, 2026-10-28 (project note base-nft-marketplaces)'),
+    ('zone', '0x000000e7ec00e7b300774b00001314b8610022b8', 'OpenSea',
+     'Dune spellbook seaport_base_tagging.sql'),
+    ('zone', '0x110b2b128a9ed1be5ef3232d8e4e41640df5c2cd', 'OpenSea',
+     'Dune spellbook seaport_base_tagging.sql'),
+    ('zone', '0x000056f7000000ece9003ca63978907a00ffd100', 'OpenSea',
+     'On-chain scan of Seaport 1.6 OrderFulfilled on Base, 2026-10-28 (project note base-nft-marketplaces)'),
+    ('calldata_tag', '0x360c6ebe', 'OpenSea',
+     'Dune spellbook seaport_base_tagging.sql'),
+    ('zone', '0x2de95b9afd737b0814e5e6013593a9437c5532d5', 'OKX',
+     'Seaport 1.5 zone named by the card; not found in the Dune spellbook or the Base scan, unverified'),
+    ('zone', '0xdf2d4bffec010debd302674c9fb9cda99bb5e852', 'OKX',
+     'On-chain scan of Seaport 1.6 OrderFulfilled on Base, 2026-10-28 (project note base-nft-marketplaces)'),
+    ('calldata_tag', '0x332d1229', 'Blur',
+     'Dune spellbook nft_ethereum_aggregators_markers.sql'),
+    ('calldata_tag', '0x72db8c0b', 'Gem',
+     'Dune spellbook nft_ethereum_aggregators_markers.sql'),
+    ('calldata_tag', '0x0021fb3f', 'Mint.fun',
+     'Dune spellbook seaport_ethereum_tagging.sql'),
+    ('calldata_tag', '0x1d4da48b', 'Reservoir',
+     'Dune spellbook seaport_ethereum_tagging.sql'),
+    ('calldata_tag', '0xc4ac6e7e', 'LooksRare',
+     'LooksRare tag named by the card; not found in the Dune spellbook files checked, unverified'),
+    ('calldata_tag', '0xa8a9c101', 'Magically',
+     'Dune spellbook nft_ethereum_aggregators_markers.sql'),
+    ('calldata_tag', '0x61598d6d', 'Flip',
+     'Dune spellbook nft_ethereum_aggregators_markers.sql'),
+    ('calldata_tag', '0x64617461', 'Rarible',
+     'Dune spellbook nft_ethereum_aggregators_markers.sql');

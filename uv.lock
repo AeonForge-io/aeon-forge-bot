@@ -7,7 +7,7 @@ resolution-markers = [
 ]
 
 [[package]]
-name = "activity-bot"
+name = "aeon-forge-bot"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [

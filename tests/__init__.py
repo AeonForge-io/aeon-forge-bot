@@ -1,1 +1,1 @@
-"""Test suite for Activity Bot."""
+"""Test suite for the Aeon Forge bot."""

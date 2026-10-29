@@ -1,1 +1,1 @@
-"""Activity Bot - AI-powered development activity tracking bot."""
+"""Aeon Forge bot - Discord posts for Aeon Forge NFT activity."""
