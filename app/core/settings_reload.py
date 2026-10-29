@@ -16,7 +16,7 @@ from app.core.store import Collection, CompanyWallet, MarketplaceMark, Store
 logger = get_logger(__name__)
 
 RELOAD_INTERVAL_SECONDS = 60
-HEARTBEAT_PATH = Path("/app/data/heartbeat")
+HEARTBEAT_PATH = Path("/tmp/aeon-forge-bot-heartbeat")
 
 ContractsChanged = Callable[[str, frozenset[str]], Awaitable[None]]
 

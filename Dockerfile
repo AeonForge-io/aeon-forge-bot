@@ -50,7 +50,7 @@ USER appuser
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=3s --start-period=90s --retries=3 \
-    CMD python -c "import os,sys,time; sys.exit(0 if time.time()-os.path.getmtime('/app/data/heartbeat')<180 else 1)" || exit 1
+    CMD python -c "import os,sys,time; sys.exit(0 if time.time()-os.path.getmtime('/tmp/aeon-forge-bot-heartbeat')<180 else 1)" || exit 1
 
 # Run the application
 CMD ["python", "-m", "app.main"]
