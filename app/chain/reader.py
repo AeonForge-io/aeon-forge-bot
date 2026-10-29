@@ -296,6 +296,8 @@ class ChainReader:
         transfer: TransferLog,
         receipts: dict[str, list[ForumOneSale]],
     ) -> ForumOneSale | None:
+        if collection.chain != "base":
+            return None  # the Forum One proxy is Base-only; test contracts are never decoded
         if not collection.track_marketplace or FORUM_ONE_MARKETPLACE not in collection.marketplaces:
             return None
         if transfer.tx_hash not in receipts:

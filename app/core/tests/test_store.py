@@ -223,3 +223,21 @@ async def test_pending_events_are_listed_oldest_first_and_only_while_pending(
     assert [b.token_id for _, b in await store.list_pending_burns()] == ["2"]
     assert [m.token_id for _, m in await store.list_pending_mints()] == ["1"]
     assert [t.token_id for _, t in await store.list_pending_transfers()] == ["3"]
+
+    sale = NFTSaleEvent(
+        collection_id=cid,
+        token_id="4",
+        seller_address=HOLDER,
+        buyer_address=OTHER,
+        marketplace="forum_one",
+        price_native=Decimal("12.5"),
+        currency="USDC",
+        sale_id=f"{TX_A}:4",
+        transaction_hash=TX_A,
+        event_timestamp=WHEN,
+    )
+    assert await store.insert_sale(sale, PostStatus.PENDING) is not None
+    pending_sales = [s for _, s in await store.list_pending_sales()]
+    assert [(s.token_id, s.currency, s.transaction_hash, s.sale_id) for s in pending_sales] == [
+        ("4", "USDC", TX_A, f"{TX_A}:4")
+    ]

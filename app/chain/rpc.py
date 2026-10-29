@@ -142,10 +142,14 @@ class ChainRpc:
         logs: list[dict[str, Any]] = await self.transport.request("eth_getLogs", [log_filter])
         return logs
 
-    async def call_uint(self, to: str, selector: str, block_number: int) -> int:
+    async def call_uint(self, to: str, selector: str, block_number: int | str) -> int:
         """eth_call a no-argument function returning one uint256, at a block."""
         result = await self.transport.request(
-            "eth_call", [{"to": to, "data": selector}, hex(block_number)]
+            "eth_call",
+            [
+                {"to": to, "data": selector},
+                block_number if isinstance(block_number, str) else hex(block_number),
+            ],
         )
         return hex_to_int(result)
 
@@ -170,10 +174,6 @@ class ChainRpc:
             length = int.from_bytes(raw[32:64], "big")
             self._erc20_coins[token] = Coin(
                 raw[64 : 64 + length].decode(),
-                hex_to_int(
-                    await self.transport.request(
-                        "eth_call", [{"to": token, "data": DECIMALS_SELECTOR}, "latest"]
-                    )
-                ),
+                await self.call_uint(token, DECIMALS_SELECTOR, "latest"),
             )
         return self._erc20_coins[token]

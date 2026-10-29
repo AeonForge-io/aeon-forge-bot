@@ -1,7 +1,7 @@
 """Forum One sales read from the transaction receipt of a tracked Transfer."""
 
 from dataclasses import replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
@@ -23,7 +23,6 @@ SELLER = "0x00000000000000000000000000000000000000a1"
 BUYER = "0x00000000000000000000000000000000000000b2"
 USDC = "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913"
 TX_A = "0x" + "a1" * 32
-TX_B = "0x" + "b2" * 32
 ORDER_HASH = "0x" + "99" * 32
 
 SALE_TOPIC = "0x57922c657d2aa8c0407bcb047bc5a483d91c0f7e28188f214b14a84eab893be8"
@@ -218,6 +217,42 @@ async def test_a_failed_sale_post_is_retried_by_the_loop(base_bot: Bot) -> None:
 
 async def test_test_contract_sales_are_never_decoded() -> None:
     bot = await build_bot("base-sepolia", sepolia_collection())
+    await bot.store.set_cursor("base-sepolia", 100, datetime.fromtimestamp(block_time(100), UTC))
+    bot.alchemy.head = 101
+    bot.alchemy.receipts[TX_A] = [
+        forum_one_log(SALE_TOPIC, 5, 10**18, asset_contract=TEST_CONTRACT)
+    ]
+
+    await read(bot, transfer_log(TEST_CONTRACT, 5, 101, TX_A, 0, SELLER, BUYER))
+
+    assert bot.alchemy.receipt_requests == []
+    assert bot.store.events[EventKind.SALE] == []
+
+
+async def test_a_pending_sale_expires_after_six_hours() -> None:
+    from app.chain.tests.test_transfers_and_retries import run_loop_once
+
+    bot = await build_bot("base", dragonz_collection())
+    await bot.store.set_cursor("base", 100, datetime.fromtimestamp(block_time(100), UTC))
+    bot.alchemy.head = 101
+    bot.discord.missing_channels = frozenset({MAIN_CHANNEL})
+    bot.alchemy.receipts[TX_A] = [forum_one_log(SALE_TOPIC, 5, 10**18)]
+    await read(bot, sale_transfer())
+    event_time = datetime.fromtimestamp(block_time(101), UTC)
+
+    bot.discord.missing_channels = frozenset()
+    bot.clock.current = event_time + timedelta(hours=6, seconds=1)
+    await run_loop_once(bot)
+
+    assert [s.status for s in bot.store.events[EventKind.SALE]] == [PostStatus.EXPIRED]
+    assert bot.discord.messages(MAIN_CHANNEL) == []
+
+
+async def test_forum_one_sales_are_not_decoded_off_base() -> None:
+    bot = await build_bot(
+        "base-sepolia",
+        replace(sepolia_collection(), track_marketplace=True, marketplaces=("forum_one",)),
+    )
     await bot.store.set_cursor("base-sepolia", 100, datetime.fromtimestamp(block_time(100), UTC))
     bot.alchemy.head = 101
     bot.alchemy.receipts[TX_A] = [

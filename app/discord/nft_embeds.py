@@ -270,7 +270,7 @@ def create_listing_card(
         event.token_image_url,
         _lines(
             ("Seller", event.short_seller_address),
-            ("Price", _format_price(event.price_native, event.price_usd, event.currency)),
+            ("Price", _format_price(event.price_native, event.price_usd)),
             ("Marketplace", _format_marketplace(event.marketplace)),
             ("Rarity", f"#{event.rarity_rank}" if event.rarity_rank else None),
         ),
