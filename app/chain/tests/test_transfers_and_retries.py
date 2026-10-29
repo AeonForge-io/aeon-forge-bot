@@ -1,7 +1,10 @@
 """Burns, company-wallet transfers, retries and expiry through the chain reader."""
 
+import asyncio
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
+from typing import Any
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -214,3 +217,41 @@ async def test_pending_post_of_a_removed_collection_is_logged(
 
     assert "post.retry.collection_missing" in capsys.readouterr().out
     assert statuses(bot, EventKind.BURN) == [PostStatus.PENDING]
+
+
+async def test_retry_does_not_repost_an_event_whose_live_post_is_still_sending(bot: Bot) -> None:
+    started = asyncio.Event()
+    release = asyncio.Event()
+    original = bot.discord.client.get_channel.side_effect
+
+    def holding_channel(channel_id: int) -> MagicMock | None:
+        channel = original(channel_id)
+        send = channel.send
+
+        async def held_send(**kwargs: Any) -> None:
+            started.set()
+            await release.wait()
+            await send(**kwargs)
+
+        channel.send = AsyncMock(side_effect=held_send)
+        return channel  # type: ignore[no-any-return]
+
+    bot.discord.client.get_channel.side_effect = holding_channel
+
+    live = asyncio.create_task(
+        read_transfers(bot, transfer_log(TEST_CONTRACT, 9, 101, TX_A, 0, HOLDER, ZERO_ADDRESS))
+    )
+    await started.wait()
+    assert statuses(bot, EventKind.BURN) == [PostStatus.PENDING]
+
+    bot.clock.current = datetime.fromtimestamp(block_time(101), UTC) + timedelta(seconds=60)
+    await bot.publisher.retry_pending()
+    assert bot.discord.messages(TEST_CHANNEL) == []
+
+    release.set()
+    await live
+    assert len(bot.discord.messages(TEST_CHANNEL)) == 1
+    assert statuses(bot, EventKind.BURN) == [PostStatus.POSTED]
+
+    await bot.publisher.retry_pending()
+    assert len(bot.discord.messages(TEST_CHANNEL)) == 1
