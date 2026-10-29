@@ -57,7 +57,7 @@ class ForumOneApi:
             async with self._session.get(url, params={"all": 1, "offset": offset}) as response:
                 response.raise_for_status()
                 page: dict[str, Any] = await response.json()
-        except (aiohttp.ClientError, TimeoutError) as e:
+        except (aiohttp.ClientError, TimeoutError, ValueError) as e:
             raise ForumOneError(f"Listings request failed: {type(e).__name__}: {e}") from e
         return page
 
@@ -103,7 +103,7 @@ class ForumOnePoller:
         self.publisher = publisher
 
     async def run(self, interval: float = POLL_INTERVAL_SECONDS) -> None:
-        """Poll forever; a failed store or Discord call raises and stops the bot."""
+        """Poll forever; a failed store call raises and stops the bot, a Forum One fault waits."""
         while True:
             await self.poll_once()
             await asyncio.sleep(interval)
@@ -151,7 +151,9 @@ class ForumOnePoller:
             listings.extend(page.listings)
             if not page.hasMore:
                 return listings
-            offset += PAGE_SIZE
+            if not page.listings:
+                return listings
+            offset += len(page.listings)
 
     @staticmethod
     def _event(collection: Collection, listing: ForumOneListing) -> NFTListingEvent:

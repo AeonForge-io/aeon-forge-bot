@@ -12,7 +12,7 @@ from app.core.settings_reload import SettingsReloader
 from app.core.store import Collection, EventKind, PostStatus
 from app.discord.event_publisher import EventPublisher
 from app.discord.nft_poster import NFTPoster
-from app.marketplace.forum_one import PAGE_SIZE, ForumOnePoller
+from app.marketplace.forum_one import PAGE_SIZE, ForumOneError, ForumOnePoller
 
 LE_CONTRACT = "0xa02fff7fe01eeb235cb65d501efc65c65d7ad509"
 SELLER = "0x9195312b2dc49eee39c4c1bcf89c0ace287930fd"
@@ -47,13 +47,20 @@ class FakeForumOne:
 
     listings: list[dict[str, Any]] = field(default_factory=list)
     requests: list[tuple[str, int]] = field(default_factory=list)
+    page_size: int = PAGE_SIZE
+    failing_contracts: frozenset[str] = frozenset()
+    malformed_contracts: frozenset[str] = frozenset()
 
     async def listings_page(self, _chain: str, contract: str, offset: int) -> dict[str, Any]:
         self.requests.append((contract, offset))
-        page = self.listings[offset : offset + PAGE_SIZE]
+        if contract in self.failing_contracts:
+            raise ForumOneError("HTTP 503")
+        if contract in self.malformed_contracts:
+            return {"unexpected": True}
+        page = self.listings[offset : offset + self.page_size]
         return {
             "listings": page,
-            "hasMore": offset + PAGE_SIZE < len(self.listings),
+            "hasMore": offset + self.page_size < len(self.listings),
             "offset": offset,
         }
 

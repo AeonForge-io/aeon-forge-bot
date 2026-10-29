@@ -1,10 +1,17 @@
 """Forum One listings through the poller: forumone.io pages in, Discord messages out."""
 
+import json
 from dataclasses import replace
+from datetime import timedelta
+
+import aiohttp
+import pytest
 
 from app.chain.tests.conftest import MAIN_CHANNEL
-from app.core.store import PostStatus
-from app.marketplace.tests.conftest import LE_CONTRACT, SELLER, Poller, listing
+from app.core.store import EventKind, PostStatus
+from app.marketplace.forum_one import ForumOneApi, ForumOneError
+from app.marketplace.tests.conftest import LE_CONTRACT, SELLER, Poller, le_collection, listing
+from app.nft.models import NFTListingEvent
 
 HASH_A = "0x" + "a1" * 32
 HASH_B = "0x" + "b2" * 32
@@ -101,3 +108,96 @@ async def test_collections_without_forum_one_tracking_are_not_polled(poller: Pol
 
     await poller.poller.poll_once()
     assert poller.forum_one.requests == []
+
+
+async def test_pages_of_a_different_size_skip_nothing(poller: Poller) -> None:
+    poller.forum_one.page_size = 20
+    poller.forum_one.listings = [listing(n, f"0x{n:064x}") for n in range(1, 56)]
+    await poller.poller.poll_once()
+    assert [offset for _, offset in poller.forum_one.requests] == [0, 20, 40]
+    assert poller.statuses() == [PostStatus.SKIPPED] * 55
+
+
+async def test_a_forum_one_outage_sets_no_baseline_and_other_collections_still_poll(
+    poller: Poller,
+) -> None:
+    other = "0x" + "9" * 40
+    poller.store.add_collection(
+        le_collection(collection_id="other", contract_address=other, name="Other")
+    )
+    await poller.reloader.reload()
+    poller.forum_one.failing_contracts = frozenset({LE_CONTRACT})
+    poller.forum_one.listings = [listing(1, HASH_A)]
+    await poller.poller.poll_once()
+    assert {contract for contract, _ in poller.forum_one.requests} == {LE_CONTRACT, other}
+    assert poller.statuses() == [PostStatus.SKIPPED]  # only the other collection's baseline
+
+    poller.forum_one.failing_contracts = frozenset()
+    poller.forum_one.listings = [listing(1, HASH_A), listing(2, HASH_B)]
+    await poller.poller.poll_once()
+    # the other collection posts its new listing; LE's first successful poll is its baseline
+    assert len(poller.discord.messages(MAIN_CHANNEL)) == 1
+    assert poller.statuses().count(PostStatus.PENDING) == 0
+
+
+async def test_a_malformed_page_is_contained_and_sets_no_baseline(poller: Poller) -> None:
+    poller.forum_one.malformed_contracts = frozenset({LE_CONTRACT})
+    await poller.poller.poll_once()
+    assert poller.statuses() == []
+    assert poller.discord.sent == {}
+
+
+async def test_a_pending_listing_expires_after_six_hours(poller: Poller) -> None:
+    await poller.poller.poll_once()
+    poller.discord.missing_channels = frozenset({MAIN_CHANNEL})
+    poller.forum_one.listings = [listing(24, HASH_A)]
+    await poller.poller.poll_once()
+    event = poller.store.events[EventKind.LISTING][0].event
+    assert isinstance(event, NFTListingEvent)
+    event_time = event.event_timestamp
+
+    poller.clock.current = event_time + timedelta(hours=6)
+    await poller.publisher.retry_pending()
+    assert poller.statuses() == [PostStatus.PENDING]
+
+    poller.discord.missing_channels = frozenset()
+    poller.clock.current = event_time + timedelta(hours=6, seconds=1)
+    await poller.publisher.retry_pending()
+    assert poller.statuses() == [PostStatus.EXPIRED]
+    assert poller.discord.sent == {}
+
+
+class _Response:
+    def __init__(self, status: int, body: str) -> None:
+        self.status = status
+        self._body = body
+
+    async def __aenter__(self) -> "_Response":
+        return self
+
+    async def __aexit__(self, *_: object) -> None:
+        return None
+
+    def raise_for_status(self) -> None:
+        if self.status >= 400:
+            raise aiohttp.ClientError(f"HTTP {self.status}")
+
+    async def json(self) -> object:
+        return json.loads(self._body)
+
+
+class _Session:
+    def __init__(self, response: _Response) -> None:
+        self.response = response
+
+    def get(self, *_: object, **__: object) -> _Response:
+        return self.response
+
+
+@pytest.mark.parametrize(
+    "response", [_Response(503, "{}"), _Response(200, "<html>not json")], ids=["5xx", "bad-json"]
+)
+async def test_api_faults_become_forum_one_errors(response: _Response) -> None:
+    api = ForumOneApi(_Session(response))  # type: ignore[arg-type]
+    with pytest.raises(ForumOneError):
+        await api.listings_page("base", LE_CONTRACT, 0)

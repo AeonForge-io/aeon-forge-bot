@@ -78,7 +78,7 @@ def _format_marketplace(marketplace: str) -> str:
     return MARKETPLACE_DISPLAY_NAMES.get(marketplace, marketplace.replace("_", " ").title())
 
 
-def _format_eth_price(
+def _format_price(
     price: Decimal | None, price_usd: Decimal | None = None, currency: str | None = None
 ) -> str:
     """Format a price in its coin (ETH when currency is None) with optional USD value.
@@ -197,7 +197,7 @@ def create_mint_card(
                 ("Minter", event.short_to_address),
                 (
                     "Price",
-                    _format_eth_price(event.price_native, event.price_usd)
+                    _format_price(event.price_native, event.price_usd)
                     if event.price_native is not None
                     else None,
                 ),
@@ -271,7 +271,7 @@ def create_listing_card(
         event.token_image_url,
         _lines(
             ("Seller", event.short_seller_address),
-            ("Price", _format_eth_price(event.price_native, event.price_usd, event.currency)),
+            ("Price", _format_price(event.price_native, event.price_usd, event.currency)),
             ("Marketplace", _format_marketplace(event.marketplace)),
             ("Rarity", f"#{event.rarity_rank}" if event.rarity_rank else None),
         ),
@@ -295,7 +295,7 @@ def create_sale_card(
         _lines(
             ("Seller", event.short_seller_address),
             ("Buyer", event.short_buyer_address),
-            ("Price", _format_eth_price(event.price_native, event.price_usd)),
+            ("Price", _format_price(event.price_native, event.price_usd)),
             ("Marketplace", _format_marketplace(event.marketplace)),
             ("Rarity", f"#{event.rarity_rank}" if event.rarity_rank else None),
         ),

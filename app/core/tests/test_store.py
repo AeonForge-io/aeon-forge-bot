@@ -223,3 +223,9 @@ async def test_pending_events_are_listed_oldest_first_and_only_while_pending(
     assert [b.token_id for _, b in await store.list_pending_burns()] == ["2"]
     assert [m.token_id for _, m in await store.list_pending_mints()] == ["1"]
     assert [t.token_id for _, t in await store.list_pending_transfers()] == ["3"]
+    pending_listing_id = await store.insert_listing(listing(cid, "0xp"), PostStatus.PENDING)
+    await store.insert_listing(listing(cid, "0xs"), PostStatus.SKIPPED)
+    assert pending_listing_id is not None
+    assert [(i, x.listing_id) for i, x in await store.list_pending_listings()] == [
+        (pending_listing_id, "0xp")
+    ]
