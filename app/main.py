@@ -8,7 +8,7 @@ from contextlib import AsyncExitStack
 import aiohttp
 
 from app.chain.reader import ChainReader
-from app.chain.rpc import AlchemyTransport, ChainRpc
+from app.chain.rpc import AlchemyTransport, ChainRpc, HttpTransport
 from app.core.config import get_settings
 from app.core.database import DatabaseClient
 from app.core.logging import get_logger, setup_logging
@@ -22,6 +22,10 @@ from app.nft.wallet_names import WalletNames
 from app.shared.exceptions import ConfigError, DatabaseError
 
 logger = get_logger(__name__)
+
+# Free public RPCs with no key, for wallet-name reads
+PUBLIC_ETHEREUM_RPC = "https://ethereum-rpc.publicnode.com"
+PUBLIC_BASE_RPC = "https://mainnet.base.org"
 
 # Module-level variables for lifecycle management
 database_client: DatabaseClient | None = None
@@ -95,10 +99,11 @@ async def startup() -> None:
     # The first reload reports every tracked chain as changed, which starts its reader,
     # so it runs only once everything a reader needs exists
     settings_reloader = SettingsReloader(database_client, on_contracts_changed)
-    # Names are per wallet, not per NFT chain: ENS lives on Ethereum, Basenames on Base
+    # Names are per wallet, not per NFT chain: ENS lives on Ethereum, Basenames on Base.
+    # They are read from free public RPCs, not Alchemy
     wallet_names = WalletNames(
-        await transports.enter_async_context(AlchemyTransport("ethereum")),
-        await transports.enter_async_context(AlchemyTransport("base")),
+        await transports.enter_async_context(HttpTransport(PUBLIC_ETHEREUM_RPC)),
+        await transports.enter_async_context(HttpTransport(PUBLIC_BASE_RPC)),
         database_client,
     )
     event_publisher = EventPublisher(

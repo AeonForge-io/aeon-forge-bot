@@ -7,12 +7,7 @@ from app.chain.rpc import ChainConnectionError, RpcResponseError
 from app.core.memory_store import MemoryStore
 from app.core.store import WalletNameRecord
 from app.nft.tests.fake_names import FakeNameChain
-from app.nft.wallet_names import (
-    BASE_REVERSE_SUFFIX,
-    ENS_REVERSE_SUFFIX,
-    WalletNames,
-    is_safe_name,
-)
+from app.nft.wallet_names import WalletNames, is_safe_name
 
 ALICE = "0x" + "a1" * 20
 BOB = "0x" + "b2" * 20
@@ -22,8 +17,8 @@ NOW = datetime(2026, 10, 28, 12, 0, tzinfo=UTC)
 
 class Setup:
     def __init__(self) -> None:
-        self.ens = FakeNameChain(ENS_REVERSE_SUFFIX)
-        self.base = FakeNameChain(BASE_REVERSE_SUFFIX)
+        self.ens = FakeNameChain()
+        self.base = FakeNameChain()
         self.store = MemoryStore()
         self.now = NOW
         self.names = WalletNames(self.ens, self.base, self.store, lambda: self.now)
@@ -37,59 +32,88 @@ class Setup:
         return WalletNames(self.ens, self.base, self.store, lambda: self.now)
 
 
-async def test_ens_name_is_used_and_basename_is_not_asked() -> None:
+async def test_ens_name_costs_one_ethereum_call_and_no_base_call() -> None:
     s = Setup()
-    s.ens.set_name(ALICE, "alice.eth")
-    s.base.set_name(ALICE, "alice.base.eth")
+    s.ens.set_ens_name(ALICE, "alice.eth")
+    s.base.set_basename(ALICE, "alice.base.eth")
 
     assert await s.names.names([ALICE]) == {ALICE: "alice.eth"}
+    assert len(s.ens.calls) == 1
     assert s.base.calls == []
-    assert len(s.ens.calls) == 4  # reverse resolver, name, forward resolver, addr
 
 
-async def test_basename_is_used_when_there_is_no_ens_name() -> None:
+async def test_two_wallets_in_one_post_cost_one_ethereum_call() -> None:
     s = Setup()
-    s.base.set_name(BOB, "bob.base.eth")
+    s.ens.set_ens_name(ALICE, "alice.eth")
+    s.ens.set_ens_name(BOB, "bob.eth")
+
+    assert await s.names.names([ALICE, BOB]) == {ALICE: "alice.eth", BOB: "bob.eth"}
+    assert len(s.ens.calls) == 1
+
+
+async def test_reverted_universal_resolver_call_falls_through_to_basename() -> None:
+    s = Setup()
+    s.ens.set_ens_name(ALICE, "alice.eth")  # BOB's coin-60 lookup reverts
+    s.base.set_basename(BOB, "bob.base.eth")
+
+    assert await s.names.names([ALICE, BOB]) == {ALICE: "alice.eth", BOB: "bob.base.eth"}
+    assert len(s.ens.calls) == 1
+    assert len(s.base.calls) == 2  # reverse names, then forward checks; ALICE is not asked
+
+
+async def test_basename_from_the_registrar_when_the_resolver_has_none() -> None:
+    s = Setup()
+    s.base.set_basename(BOB, "bob.base.eth", via_registrar=True)
 
     assert await s.names.names([BOB]) == {BOB: "bob.base.eth"}
-    assert len(s.ens.calls) == 1  # no reverse resolver set
-    assert len(s.base.calls) == 4
 
 
-async def test_ens_name_whose_forward_address_differs_falls_to_basename() -> None:
+async def test_resolver_name_is_preferred_over_the_registrar() -> None:
     s = Setup()
-    s.ens.set_name(MALLORY, "vitalik.eth", forward=ALICE)
-    s.base.set_name(MALLORY, "mallory.base.eth")
+    s.base.set_basename(BOB, "bob.base.eth")
+    s.base.set_basename(BOB, "other.base.eth", via_registrar=True)
 
-    assert await s.names.names([MALLORY]) == {MALLORY: "mallory.base.eth"}
+    assert await s.names.names([BOB]) == {BOB: "bob.base.eth"}
 
 
-async def test_claimed_name_that_does_not_forward_back_is_no_name() -> None:
+async def test_claimed_basename_that_does_not_forward_back_is_no_name() -> None:
     s = Setup()
-    s.base.set_name(MALLORY, "vitalik.base.eth", forward=ALICE)
+    s.base.set_basename(MALLORY, "vitalik.base.eth", forward=ALICE)
 
     assert await s.names.names([MALLORY]) == {}
+
+
+async def test_registry_pointing_at_another_resolver_costs_one_more_call() -> None:
+    s = Setup()
+    other = "0x" + "77" * 20
+    s.base.set_basename(BOB, "bob.base.eth", registry_resolver=other)
+    s.base.set_basename(MALLORY, "mal.base.eth", forward=ALICE, registry_resolver=other)
+
+    assert await s.names.names([BOB, MALLORY]) == {BOB: "bob.base.eth"}
+    assert len(s.base.calls) == 3
 
 
 async def test_wallet_with_no_name_gets_no_entry_and_costs_two_calls() -> None:
     s = Setup()
 
-    assert await s.names.names([ALICE]) == {}
-    assert s.rpc_calls == 2
+    assert await s.names.names([ALICE, BOB]) == {}
+    assert len(s.ens.calls) == 1
+    assert len(s.base.calls) == 1
+    assert s.store.wallet_names[ALICE].ens_name is None
 
 
 async def test_basename_must_end_in_base_eth() -> None:
     s = Setup()
-    s.base.set_name(ALICE, "alice.eth")
+    s.base.set_basename(ALICE, "alice.eth")
 
     assert await s.names.names([ALICE]) == {}
 
 
 async def test_unsafe_names_are_rejected() -> None:
     s = Setup()
-    s.ens.set_name(ALICE, "**bold**.eth")
-    s.ens.set_name(BOB, "A" * 10 + ".eth")
-    s.base.set_name(MALLORY, "x" * 40 + ".base.eth")  # over 40 characters
+    s.ens.set_ens_name(ALICE, "**bold**.eth")
+    s.ens.set_ens_name(BOB, "A" * 10 + ".eth")
+    s.base.set_basename(MALLORY, "x" * 40 + ".base.eth")  # over 40 characters
 
     assert await s.names.names([ALICE, BOB, MALLORY]) == {}
     assert is_safe_name("alice.eth")
@@ -102,7 +126,7 @@ async def test_unsafe_names_are_rejected() -> None:
 
 async def test_second_lookup_of_the_same_address_makes_no_calls() -> None:
     s = Setup()
-    s.ens.set_name(ALICE, "alice.eth")
+    s.ens.set_ens_name(ALICE, "alice.eth")
 
     await s.names.names([ALICE, BOB])
     calls = s.rpc_calls
@@ -126,7 +150,7 @@ async def test_database_row_younger_than_seven_days_makes_no_calls() -> None:
 async def test_database_row_older_than_seven_days_is_checked_again() -> None:
     s = Setup()
     s.store.wallet_names[ALICE] = WalletNameRecord(ALICE, "old.eth", None, NOW - timedelta(days=8))
-    s.ens.set_name(ALICE, "new.eth")
+    s.ens.set_ens_name(ALICE, "new.eth")
 
     assert await s.names.names([ALICE]) == {ALICE: "new.eth"}
     assert s.store.wallet_names[ALICE].ens_name == "new.eth"
@@ -137,14 +161,14 @@ async def test_process_cache_also_expires_after_seven_days() -> None:
     s = Setup()
     await s.names.names([ALICE])
     s.now += timedelta(days=8)
-    s.ens.set_name(ALICE, "alice.eth")
+    s.ens.set_ens_name(ALICE, "alice.eth")
 
     assert await s.names.names([ALICE]) == {ALICE: "alice.eth"}
 
 
 async def test_result_is_stored_so_a_restart_makes_no_calls() -> None:
     s = Setup()
-    s.base.set_name(BOB, "bob.base.eth")
+    s.base.set_basename(BOB, "bob.base.eth")
     await s.names.names([BOB, ALICE])
     calls = s.rpc_calls
 
@@ -155,7 +179,7 @@ async def test_result_is_stored_so_a_restart_makes_no_calls() -> None:
 
 async def test_failed_lookup_shows_no_name_and_is_not_cached() -> None:
     s = Setup()
-    s.ens.set_name(ALICE, "alice.eth")
+    s.ens.set_ens_name(ALICE, "alice.eth")
     s.ens.error = ChainConnectionError("down")
 
     assert await s.names.names([ALICE]) == {}
@@ -169,34 +193,13 @@ async def test_failed_lookup_shows_no_name_and_is_not_cached() -> None:
     assert await s.names.names([ALICE]) == {ALICE: "alice.eth"}
 
 
-async def test_failure_on_the_basename_step_is_not_cached_either() -> None:
+async def test_failure_on_the_base_step_is_not_cached_but_ens_names_are() -> None:
     s = Setup()
+    s.ens.set_ens_name(ALICE, "alice.eth")
     s.base.error = ChainConnectionError("down")
 
-    assert await s.names.names([ALICE]) == {}
-    assert s.store.wallet_names == {}
-
-
-async def test_execution_revert_means_no_name_and_is_cached() -> None:
-    s = Setup()
-    s.ens.error = RpcResponseError("eth_call returned an error: {'message': 'execution reverted'}")
-
-    assert await s.names.names([ALICE]) == {}
-    assert ALICE in s.store.wallet_names
-
-
-async def test_one_failing_address_does_not_hide_the_others() -> None:
-    s = Setup()
-    s.ens.set_name(ALICE, "alice.eth")
-    original = s.ens.request
-
-    async def flaky(method: str, params: list[object]) -> object:
-        if BOB[2:] in str(params) or s.ens.error:
-            raise ChainConnectionError("down")
-        return await original(method, params)
-
-    s.ens.request = flaky  # type: ignore[method-assign]
     assert await s.names.names([ALICE, BOB]) == {ALICE: "alice.eth"}
+    assert list(s.store.wallet_names) == [ALICE]
 
 
 async def test_slow_lookup_is_cut_off_and_not_cached(monkeypatch: object) -> None:

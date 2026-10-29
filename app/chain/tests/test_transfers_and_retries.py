@@ -19,7 +19,7 @@ from app.chain.tests.conftest import (
 from app.core.store import EventKind, PostStatus
 from app.nft.models import ZERO_ADDRESS
 from app.nft.tests.fake_names import FakeNameChain
-from app.nft.wallet_names import BASE_REVERSE_SUFFIX, ENS_REVERSE_SUFFIX, WalletNames
+from app.nft.wallet_names import WalletNames
 
 TX_A = "0x" + "a1" * 32
 TX_B = "0x" + "b2" * 32
@@ -112,10 +112,10 @@ async def test_all_mode_posts_every_transfer_and_marks_company_senders(bot: Bot)
 async def test_transfer_shows_wallet_names_and_leaves_a_company_sender_unresolved(
     bot: Bot,
 ) -> None:
-    ens = FakeNameChain(ENS_REVERSE_SUFFIX)
-    ens.set_name(TREASURY, "treasury.eth")
-    ens.set_name(HOLDER, "holder.eth")
-    bot.publisher.wallet_names = WalletNames(ens, FakeNameChain(BASE_REVERSE_SUFFIX), bot.store)
+    ens = FakeNameChain()
+    ens.set_ens_name(TREASURY, "treasury.eth")
+    ens.set_ens_name(HOLDER, "holder.eth")
+    bot.publisher.wallet_names = WalletNames(ens, FakeNameChain(), bot.store)
     bot.store.add_company_wallet(TREASURY, "Treasury")
     await set_mode(bot, "all")
 

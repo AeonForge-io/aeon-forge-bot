@@ -8,7 +8,6 @@ logger = get_logger(__name__)
 
 # Alchemy network name per chain, for contract calls
 ALCHEMY_NETWORKS: dict[str, str] = {
-    "ethereum": "eth-mainnet",
     "base": "base-mainnet",
     "base-sepolia": "base-sepolia",
 }
