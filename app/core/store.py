@@ -90,6 +90,17 @@ class ChainCursor:
     last_block_time: datetime | None
 
 
+@dataclass(frozen=True)
+class StoredListing:
+    """A recorded listing with its row id, post status and Discord message, if it was posted."""
+
+    id: int
+    event: NFTListingEvent
+    status: PostStatus
+    channel_id: int | None
+    message_id: int | None
+
+
 class Store(Protocol):
     """Everything the bot reads from and writes to its database."""
 
@@ -129,6 +140,25 @@ class Store(Protocol):
     async def list_pending_sales(self) -> list[tuple[int, NFTSaleEvent]]: ...
 
     async def list_pending_listings(self) -> list[tuple[int, NFTListingEvent]]: ...
+
+    # Listing posts: where each one lives in Discord, and whether the listing is still live
+    async def set_listing_message(
+        self, event_id: int, channel_id: int, message_id: int
+    ) -> None: ...
+
+    async def list_active_listings(
+        self, collection_id: int, marketplace: str
+    ) -> list[StoredListing]: ...
+
+    async def list_active_listings_of_token(
+        self, collection_id: int, token_id: str, seller_address: str
+    ) -> list[StoredListing]: ...
+
+    async def set_listing_inactive(self, event_id: int) -> None: ...
+
+    async def has_sale_since(
+        self, collection_id: int, token_id: str, seller_address: str, since: datetime
+    ) -> bool: ...
 
     async def set_post_status(self, kind: EventKind, event_id: int, status: PostStatus) -> None: ...
 

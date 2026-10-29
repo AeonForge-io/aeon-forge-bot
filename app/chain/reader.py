@@ -593,6 +593,8 @@ class ChainReader:
         event_id = await self.store.insert_sale(event, status)
         if event_id is not None and status is PostStatus.PENDING:
             await self.publisher.post_sale(collection, event_id, event)
+        if event_id is not None:
+            await self.publisher.settle_sale(collection, event)
 
     def _collection(self, contract: str) -> Collection | None:
         for collection in self.reloader.current.collections:

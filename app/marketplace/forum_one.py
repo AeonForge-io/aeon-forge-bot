@@ -1,8 +1,9 @@
 """Forum One listings: the forumone.io public API and the 60-second poller over it.
 
 The first successful poll of a collection stores every live listing as skipped and sets
-the baseline; later polls insert new orderHashes and post them. Listings that vanish are
-ignored.
+the baseline; later polls insert new orderHashes and post them. A posted listing that vanishes from
+the feed is cancelled or expired, so its message is deleted; if a sale of that token by the
+same seller was recorded since it was listed, the message is edited to sold instead.
 """
 
 import asyncio
@@ -152,6 +153,18 @@ class ForumOnePoller:
                 await self.publisher.post_listing(collection, event_id, event)
         if not has_baseline:
             await self.store.mark_marketplace_polled(collection.id, MARKETPLACE)
+        await self._close_vanished(collection, {listing.orderHash for listing in live})
+
+    async def _close_vanished(self, collection: Collection, live_hashes: set[str]) -> None:
+        """Close the stored listings the feed no longer shows (called only after a good fetch)."""
+        for stored in await self.store.list_active_listings(collection.id, MARKETPLACE):
+            if stored.event.listing_id in live_hashes:
+                continue
+            event = stored.event
+            sold = await self.store.has_sale_since(
+                collection.id, event.token_id, event.seller_address, event.event_timestamp
+            )
+            await self.publisher.close_listing(collection, stored, sold=sold)
 
     async def _fetch_all(self, collection: Collection) -> list[ForumOneListing]:
         listings: list[ForumOneListing] = []

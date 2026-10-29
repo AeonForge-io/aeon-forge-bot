@@ -17,6 +17,7 @@ from app.core.store import (
     EventKind,
     MarketplaceMark,
     PostStatus,
+    StoredListing,
 )
 from app.nft.models import (
     NFTBurnEvent,
@@ -344,6 +345,94 @@ class DatabaseClient:
     async def list_pending_listings(self) -> list[tuple[int, NFTListingEvent]]:
         rows = await self._pending("list_pending_listings", EventKind.LISTING)
         return [(r["id"], NFTListingEvent.model_validate(dict(r))) for r in rows]
+
+    async def set_listing_message(self, event_id: int, channel_id: int, message_id: int) -> None:
+        await self._run(
+            "set_listing_message",
+            lambda conn: conn.execute(
+                """
+                UPDATE nft_listings
+                SET discord_channel_id = $2, discord_message_id = $3
+                WHERE id = $1
+                """,
+                event_id,
+                channel_id,
+                message_id,
+            ),
+        )
+
+    @staticmethod
+    def _stored_listing(row: asyncpg.Record) -> StoredListing:
+        return StoredListing(
+            row["id"],
+            NFTListingEvent.model_validate(dict(row)),
+            PostStatus(row["post_status"]),
+            row["discord_channel_id"],
+            row["discord_message_id"],
+        )
+
+    async def list_active_listings(
+        self, collection_id: int, marketplace: str
+    ) -> list[StoredListing]:
+        rows = await self._run(
+            "list_active_listings",
+            lambda conn: conn.fetch(
+                """
+                SELECT * FROM nft_listings
+                WHERE collection_id = $1 AND marketplace = $2 AND is_active
+                ORDER BY event_timestamp, id
+                """,
+                collection_id,
+                marketplace,
+            ),
+        )
+        return [self._stored_listing(r) for r in rows]
+
+    async def list_active_listings_of_token(
+        self, collection_id: int, token_id: str, seller_address: str
+    ) -> list[StoredListing]:
+        rows = await self._run(
+            "list_active_listings_of_token",
+            lambda conn: conn.fetch(
+                """
+                SELECT * FROM nft_listings
+                WHERE collection_id = $1 AND token_id = $2 AND seller_address = $3 AND is_active
+                ORDER BY event_timestamp, id
+                """,
+                collection_id,
+                token_id,
+                seller_address,
+            ),
+        )
+        return [self._stored_listing(r) for r in rows]
+
+    async def set_listing_inactive(self, event_id: int) -> None:
+        await self._run(
+            "set_listing_inactive",
+            lambda conn: conn.execute(
+                "UPDATE nft_listings SET is_active = FALSE WHERE id = $1", event_id
+            ),
+        )
+
+    async def has_sale_since(
+        self, collection_id: int, token_id: str, seller_address: str, since: datetime
+    ) -> bool:
+        row = await self._run(
+            "has_sale_since",
+            lambda conn: conn.fetchrow(
+                """
+                SELECT 1 FROM nft_sales
+                WHERE collection_id = $1 AND token_id = $2 AND seller_address = $3
+                    AND event_timestamp >= $4
+                LIMIT 1
+                """,
+                collection_id,
+                token_id,
+                seller_address,
+                since,
+            ),
+        )
+        return row is not None
 
     async def set_post_status(self, kind: EventKind, event_id: int, status: PostStatus) -> None:
         # kind is an EventKind member, never user input, so naming the table is safe

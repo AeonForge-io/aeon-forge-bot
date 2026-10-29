@@ -12,3 +12,4 @@ BURN_COLOR = 0xB93931  # Red
 # Marketplace events
 LISTING_COLOR = 0xBC13FE  # Purple
 SALE_COLOR = 0xFF4D00  # Orange
+SOLD_COLOR = 0x6B7280  # Grey, a listing that has sold

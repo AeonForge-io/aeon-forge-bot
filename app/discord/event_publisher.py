@@ -11,7 +11,7 @@ from datetime import UTC, datetime, timedelta
 
 from app.core.logging import get_logger
 from app.core.settings_reload import SettingsReloader
-from app.core.store import Collection, EventKind, PostStatus, Store
+from app.core.store import Collection, EventKind, PostStatus, Store, StoredListing
 from app.discord.nft_poster import MAX_EMBEDS_PER_MESSAGE, NFTPoster
 from app.nft.models import (
     NFTBurnEvent,
@@ -164,7 +164,7 @@ class EventPublisher:
 
         async def work() -> None:
             try:
-                await self.poster.post_listing(
+                message_id = await self.poster.post_listing(
                     event,
                     collection.name,
                     collection.discord_channel_id,
@@ -177,8 +177,54 @@ class EventPublisher:
                 )
                 return
             await self.store.set_post_status(EventKind.LISTING, event_id, PostStatus.POSTED)
+            await self.store.set_listing_message(
+                event_id, collection.discord_channel_id, message_id
+            )
 
         await self._guarded(EventKind.LISTING, [event_id], work)
+
+    async def close_listing(
+        self, collection: Collection, stored: StoredListing, *, sold: bool
+    ) -> None:
+        """Mark a listing no longer live: edit its post to sold, or delete the post.
+
+        A listing never posted has no message, so only its flags change. A failed Discord
+        call is logged and leaves the listing active for the next try.
+        """
+        if stored.message_id is not None and stored.channel_id is not None:
+            try:
+                if sold:
+                    await self.poster.mark_listing_sold(
+                        stored.event,
+                        collection.name,
+                        stored.channel_id,
+                        stored.message_id,
+                        collection.chain,
+                        collection.contract_address,
+                    )
+                else:
+                    await self.poster.delete_message(stored.channel_id, stored.message_id)
+            except DiscordAPIError as e:
+                logger.error(
+                    "post.listing.close_failed",
+                    collection=collection.collection_id,
+                    listing_id=stored.event.listing_id,
+                    sold=sold,
+                    error=str(e),
+                )
+                return
+        if stored.status is PostStatus.PENDING:
+            # never posted: the retry must not post a listing that is gone
+            await self.store.set_post_status(EventKind.LISTING, stored.id, PostStatus.SKIPPED)
+        await self.store.set_listing_inactive(stored.id)
+
+    async def settle_sale(self, collection: Collection, sale: NFTSaleEvent) -> None:
+        """A sale was recorded: mark the seller's live listings of that token sold."""
+        for stored in await self.store.list_active_listings_of_token(
+            sale.collection_id, sale.token_id, sale.seller_address
+        ):
+            if stored.event.event_timestamp <= sale.event_timestamp:
+                await self.close_listing(collection, stored, sold=True)
 
     async def retry_pending(self) -> None:
         """Expire pending events past 6 hours, post the rest again."""

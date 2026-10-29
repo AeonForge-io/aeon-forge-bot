@@ -189,6 +189,9 @@ class FakeDiscord:
 
     def __init__(self, missing_channels: frozenset[int] = frozenset()) -> None:
         self.sent: dict[int, list[Card]] = {}
+        self.deleted: list[tuple[int, int]] = []
+        self.edited: list[tuple[int, int, Card]] = []
+        self._next_message_id = 1000
         self.missing_channels = missing_channels
         self.client = MagicMock(spec=discord.Client)
         self.client.get_channel.side_effect = self._channel
@@ -198,10 +201,22 @@ class FakeDiscord:
             return None
         channel = MagicMock(spec=discord.TextChannel)
 
-        async def send(**kwargs: Any) -> None:
+        async def send(**kwargs: Any) -> MagicMock:
             self.sent.setdefault(channel_id, []).append(Card(kwargs["view"]))
+            self._next_message_id += 1
+            return MagicMock(id=self._next_message_id)
+
+        def get_partial_message(message_id: int) -> MagicMock:
+            async def delete() -> None:
+                self.deleted.append((channel_id, message_id))
+
+            async def edit(**kwargs: Any) -> None:
+                self.edited.append((channel_id, message_id, Card(kwargs["view"])))
+
+            return MagicMock(delete=delete, edit=edit)
 
         channel.send = AsyncMock(side_effect=send)
+        channel.get_partial_message = get_partial_message
         return channel
 
     def messages(self, channel_id: int) -> list[Card]:

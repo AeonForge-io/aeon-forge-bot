@@ -13,6 +13,7 @@ from app.core.store import (
     MarketplaceMark,
     MarkKind,
     PostStatus,
+    StoredListing,
 )
 from app.nft.models import (
     NFTBurnEvent,
@@ -49,6 +50,10 @@ class StoredEvent:
     id: int
     event: BaseModel
     status: PostStatus
+    # listings only: the Discord message of the post, and whether the listing is still live
+    channel_id: int | None = None
+    message_id: int | None = None
+    active: bool = True
 
 
 @dataclass
@@ -162,6 +167,51 @@ class MemoryStore:
             (i, e) for i, e in self._pending(EventKind.LISTING) if isinstance(e, NFTListingEvent)
         ]
 
+    async def set_listing_message(self, event_id: int, channel_id: int, message_id: int) -> None:
+        for stored in self.events[EventKind.LISTING]:
+            if stored.id == event_id:
+                stored.channel_id, stored.message_id = channel_id, message_id
+                return
+
+    async def list_active_listings(
+        self, collection_id: int, marketplace: str
+    ) -> list[StoredListing]:
+        return [
+            listing
+            for listing in self._active_listings()
+            if listing.event.collection_id == collection_id
+            and listing.event.marketplace == marketplace
+        ]
+
+    async def list_active_listings_of_token(
+        self, collection_id: int, token_id: str, seller_address: str
+    ) -> list[StoredListing]:
+        return [
+            listing
+            for listing in self._active_listings()
+            if listing.event.collection_id == collection_id
+            and listing.event.token_id == token_id
+            and listing.event.seller_address == seller_address
+        ]
+
+    async def set_listing_inactive(self, event_id: int) -> None:
+        for stored in self.events[EventKind.LISTING]:
+            if stored.id == event_id:
+                stored.active = False
+                return
+
+    async def has_sale_since(
+        self, collection_id: int, token_id: str, seller_address: str, since: datetime
+    ) -> bool:
+        return any(
+            isinstance(s.event, NFTSaleEvent)
+            and s.event.collection_id == collection_id
+            and s.event.token_id == token_id
+            and s.event.seller_address == seller_address
+            and s.event.event_timestamp >= since
+            for s in self.events[EventKind.SALE]
+        )
+
     async def set_post_status(self, kind: EventKind, event_id: int, status: PostStatus) -> None:
         for stored in self.events[kind]:
             if stored.id == event_id:
@@ -180,6 +230,13 @@ class MemoryStore:
         next_id = self._next_id
         self._next_id += 1
         return next_id
+
+    def _active_listings(self) -> list[StoredListing]:
+        return [
+            StoredListing(s.id, s.event, s.status, s.channel_id, s.message_id)
+            for s in self.events[EventKind.LISTING]
+            if s.active and isinstance(s.event, NFTListingEvent)
+        ]
 
     def _pending(self, kind: EventKind) -> list[tuple[int, BaseModel]]:
         pending = [s for s in self.events[kind] if s.status is PostStatus.PENDING]

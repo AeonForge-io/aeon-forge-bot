@@ -2,16 +2,18 @@
 
 import json
 from dataclasses import replace
-from datetime import timedelta
+from datetime import datetime, timedelta
+from decimal import Decimal
 
 import aiohttp
 import pytest
 
 from app.chain.tests.conftest import MAIN_CHANNEL
 from app.core.store import EventKind, PostStatus
+from app.discord.nft_event_colors import SOLD_COLOR
 from app.marketplace.forum_one import ForumOneApi, ForumOneError
 from app.marketplace.tests.conftest import LE_CONTRACT, NOW, SELLER, Poller, le_collection, listing
-from app.nft.models import NFTListingEvent
+from app.nft.models import NFTListingEvent, NFTSaleEvent
 
 HASH_A = "0x" + "a1" * 32
 HASH_B = "0x" + "b2" * 32
@@ -249,3 +251,121 @@ async def test_api_faults_become_forum_one_errors(response: _Response) -> None:
     api = ForumOneApi(_Session(response))  # type: ignore[arg-type]
     with pytest.raises(ForumOneError):
         await api.listings_page("base", LE_CONTRACT, 0)
+
+
+def _sale(token_id: int, at: datetime, seller: str = SELLER) -> NFTSaleEvent:
+    return NFTSaleEvent(
+        collection_id=1,
+        token_id=str(token_id),
+        seller_address=seller,
+        buyer_address="0x" + "bb" * 20,
+        marketplace="forum_one",
+        price_native=Decimal("0.02"),
+        currency="ETH",
+        sale_id=f"0xtx:{token_id}",
+        transaction_hash="0xtx",
+        event_timestamp=at,
+    )
+
+
+async def _posted_listing(poller: Poller, token_id: int = 24, order_hash: str = HASH_A) -> None:
+    await poller.poller.poll_once()
+    poller.forum_one.listings = [listing(token_id, order_hash)]
+    await poller.poller.poll_once()
+    assert len(poller.discord.messages(MAIN_CHANNEL)) == 1
+
+
+async def test_a_listing_that_vanishes_with_no_sale_is_deleted(poller: Poller) -> None:
+    await _posted_listing(poller)
+    poller.forum_one.listings = []
+    await poller.poller.poll_once()
+    [(channel, _)] = poller.discord.deleted
+    assert channel == MAIN_CHANNEL
+    assert poller.discord.edited == []
+
+    await poller.poller.poll_once()
+    assert len(poller.discord.deleted) == 1
+
+
+async def test_listing_and_unlisting_four_times_leaves_only_the_live_post(poller: Poller) -> None:
+    await poller.poller.poll_once()
+    for n in range(4):
+        poller.forum_one.listings = [listing(24, f"0x{n:064x}")]
+        await poller.poller.poll_once()
+        poller.forum_one.listings = []
+        await poller.poller.poll_once()
+    poller.forum_one.listings = [listing(24, HASH_A)]
+    await poller.poller.poll_once()
+    assert len(poller.discord.messages(MAIN_CHANNEL)) == 5
+    assert len(poller.discord.deleted) == 4
+
+
+async def test_a_listing_that_vanishes_after_a_sale_is_edited_to_sold(poller: Poller) -> None:
+    await _posted_listing(poller)
+    stored = poller.store.events[EventKind.LISTING][0].event
+    assert isinstance(stored, NFTListingEvent)
+    await poller.store.insert_sale(
+        _sale(24, stored.event_timestamp + timedelta(seconds=5)), PostStatus.POSTED
+    )
+    poller.forum_one.listings = []
+    await poller.poller.poll_once()
+    assert poller.discord.deleted == []
+    [(_, _, card)] = poller.discord.edited
+    assert card.accent == SOLD_COLOR
+    assert card.buttons == []
+    assert card.values("Price") == ["~~0.02 ETH~~"]
+    assert "sold on Base" in card.text
+
+
+async def test_a_sale_edits_a_live_listing_and_a_later_vanish_does_nothing_more(
+    poller: Poller,
+) -> None:
+    await _posted_listing(poller)
+    sale = _sale(24, NOW + timedelta(minutes=1))
+    await poller.store.insert_sale(sale, PostStatus.SKIPPED)
+    await poller.publisher.settle_sale(poller.reloader.current.collections[0], sale)
+    [(_, _, card)] = poller.discord.edited
+    assert card.accent == SOLD_COLOR
+
+    poller.forum_one.listings = []
+    await poller.poller.poll_once()
+    assert len(poller.discord.edited) == 1
+    assert poller.discord.deleted == []
+
+
+async def test_a_sale_by_another_seller_leaves_the_listing_alone(poller: Poller) -> None:
+    await _posted_listing(poller)
+    sale = _sale(24, NOW + timedelta(minutes=1), seller="0x" + "cc" * 20)
+    await poller.publisher.settle_sale(poller.reloader.current.collections[0], sale)
+    assert poller.discord.edited == []
+
+
+async def test_a_forum_one_outage_deletes_nothing(poller: Poller) -> None:
+    await _posted_listing(poller)
+    poller.forum_one.failing_contracts = frozenset({LE_CONTRACT})
+    await poller.poller.poll_once()
+    assert poller.discord.deleted == []
+    assert poller.discord.edited == []
+
+
+async def test_a_vanished_listing_that_was_never_posted_touches_no_discord(poller: Poller) -> None:
+    poller.forum_one.listings = [listing(24, HASH_A)]
+    await poller.poller.poll_once()
+    assert poller.statuses() == [PostStatus.SKIPPED]
+    poller.forum_one.listings = []
+    await poller.poller.poll_once()
+    assert poller.discord.deleted == []
+    assert poller.discord.edited == []
+    assert await poller.store.list_active_listings(1, "forum_one") == []
+
+
+async def test_a_failed_delete_is_retried_on_the_next_poll(poller: Poller) -> None:
+    await _posted_listing(poller)
+    poller.forum_one.listings = []
+    poller.discord.missing_channels = frozenset({MAIN_CHANNEL})
+    await poller.poller.poll_once()
+    assert len(await poller.store.list_active_listings(1, "forum_one")) == 1
+
+    poller.discord.missing_channels = frozenset()
+    await poller.poller.poll_once()
+    assert len(poller.discord.deleted) == 1
