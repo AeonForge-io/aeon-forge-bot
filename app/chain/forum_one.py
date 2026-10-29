@@ -4,7 +4,6 @@ from dataclasses import dataclass
 from typing import Any
 
 FORUM_ONE_PROXY = "0x167afc814c5614c33b7140f6095a784b1f562582"
-FORUM_ONE_MARKETPLACE = "forum_one"
 
 # keccak256 of each event signature in forumone-smart-contracts IForumOne.sol, mapped to the
 # data word holding totalPrice. The data starts [assetContract, tokenId, quantity, ...]; the

@@ -47,6 +47,7 @@ def forum_one_log(
     total_price: int,
     currency: str = ETH_CURRENCY,
     asset_contract: str = DRAGONZ,
+    address: str = FORUM_ONE_PROXY,
 ) -> dict[str, Any]:
     """A Forum One proxy event as a receipt holds it."""
     signed = topic in (SIGNED_LISTING_FILLED_TOPIC, SIGNED_OFFER_ACCEPTED_TOPIC)
@@ -55,7 +56,7 @@ def forum_one_log(
         words.append(word(1))  # filledToDate
     words += [word(total_price), address_word(currency), word(0), word(0), address_word(SELLER)]
     return {
-        "address": FORUM_ONE_PROXY,
+        "address": address,
         "topics": [
             topic,
             ORDER_HASH if signed else "0x" + word(7),
@@ -191,6 +192,16 @@ async def test_a_forum_one_event_for_another_token_is_not_this_transfers_sale(
 
     assert base_bot.discord.sent == {}
     assert base_bot.store.events[EventKind.SALE] == []
+
+
+async def test_a_look_alike_sale_event_from_another_contract_is_ignored(base_bot: Bot) -> None:
+    fake = "0x" + "ee" * 20
+    base_bot.alchemy.receipts[TX_A] = [forum_one_log(SALE_TOPIC, 5, 10**18, address=fake)]
+
+    await read(base_bot, sale_transfer())
+
+    assert base_bot.store.events[EventKind.SALE] == []
+    assert base_bot.discord.sent == {}
 
 
 async def test_a_transfer_without_a_sale_event_is_a_plain_transfer(base_bot: Bot) -> None:

@@ -172,6 +172,10 @@ class ChainRpc:
             )
             raw = bytes.fromhex(symbol_result.removeprefix("0x"))
             length = int.from_bytes(raw[32:64], "big")
+            if len(raw) < 64 + length or length == 0:
+                raise ChainConnectionError(
+                    f"ERC-20 {token} symbol() is not an ABI string: {symbol_result!r}"
+                )
             self._erc20_coins[token] = Coin(
                 raw[64 : 64 + length].decode(),
                 await self.call_uint(token, DECIMALS_SELECTOR, "latest"),

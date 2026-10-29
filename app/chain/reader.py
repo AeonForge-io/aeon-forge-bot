@@ -12,12 +12,14 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 
-from app.chain.forum_one import FORUM_ONE_MARKETPLACE, ForumOneSale, forum_one_sales
+from app.chain.forum_one import ForumOneSale, forum_one_sales
 from app.chain.rpc import Block, ChainConnectionError, ChainRpc, SubscriptionError, hex_to_int
 from app.core.logging import get_logger
 from app.core.settings_reload import SettingsReloader
 from app.core.store import Collection, PostStatus, Store
 from app.discord.event_publisher import EventPublisher
+from app.marketplace.forum_one import FORUM_ONE_CHAIN_IDS
+from app.marketplace.forum_one import MARKETPLACE as FORUM_ONE_MARKETPLACE
 from app.nft.metadata import token_image_url
 from app.nft.models import (
     ZERO_ADDRESS,
@@ -296,7 +298,7 @@ class ChainReader:
         transfer: TransferLog,
         receipts: dict[str, list[ForumOneSale]],
     ) -> ForumOneSale | None:
-        if collection.chain != "base":
+        if collection.chain not in FORUM_ONE_CHAIN_IDS:
             return None  # the Forum One proxy is Base-only; test contracts are never decoded
         if not collection.track_marketplace or FORUM_ONE_MARKETPLACE not in collection.marketplaces:
             return None
