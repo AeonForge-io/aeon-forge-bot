@@ -145,6 +145,8 @@ class ChainRpc:
         """A block by number, or the head when number is None."""
         tag = "latest" if number is None else hex(number)
         raw = await self.transport.request("eth_getBlockByNumber", [tag, False])
+        if raw is None:
+            raise ChainConnectionError(f"eth_getBlockByNumber returned null for block {tag}")
         return Block(hex_to_int(raw["number"]), hex_to_int(raw["timestamp"]))
 
     async def logs(
@@ -169,12 +171,16 @@ class ChainRpc:
                 block_number if isinstance(block_number, str) else hex(block_number),
             ],
         )
+        if not result or result == "0x":
+            raise RpcResponseError(f"eth_call {selector} on {to} returned an empty result")
         return hex_to_int(result)
 
     async def transaction(self, tx_hash: str) -> Transaction:
         """A transaction's sender, target, ETH value and calldata; kept for repeat reads."""
         if tx_hash not in self._transactions:
             tx = await self.transport.request("eth_getTransactionByHash", [tx_hash])
+            if tx is None:
+                raise ChainConnectionError(f"eth_getTransactionByHash returned null for {tx_hash}")
             to = tx["to"]
             self._remember(
                 self._transactions,
@@ -206,6 +212,8 @@ class ChainRpc:
     async def transaction_logs(self, tx_hash: str) -> list[dict[str, Any]]:
         """The logs of a transaction's receipt."""
         receipt = await self.transport.request("eth_getTransactionReceipt", [tx_hash])
+        if receipt is None:
+            raise ChainConnectionError(f"eth_getTransactionReceipt returned null for {tx_hash}")
         logs: list[dict[str, Any]] = receipt["logs"]
         return logs
 

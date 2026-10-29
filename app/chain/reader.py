@@ -543,12 +543,33 @@ class ChainReader:
         self, block: Block, collection: Collection, mints: list[TransferLog]
     ) -> None:
         """Record a contract's mints in one block and post the new ones."""
-        supply = await self.rpc.call_uint(
-            collection.contract_address, TOTAL_SUPPLY_SELECTOR, block.number
-        )
-        max_supply = await self.rpc.call_uint(
-            collection.contract_address, MAX_SUPPLY_SELECTOR, block.number
-        )
+        supply: int | None = None
+        max_supply: int | None = None
+        try:
+            supply = await self.rpc.call_uint(
+                collection.contract_address, TOTAL_SUPPLY_SELECTOR, block.number
+            )
+            max_supply = await self.rpc.call_uint(
+                collection.contract_address, MAX_SUPPLY_SELECTOR, block.number
+            )
+        except RpcResponseError as e:
+            logger.error(
+                "chain.mint.supply_unreadable",
+                chain=self.chain,
+                contract=collection.contract_address,
+                block=block.number,
+                error=str(e),
+            )
+        if max_supply == 0:
+            logger.error(
+                "chain.mint.supply_unreadable",
+                chain=self.chain,
+                contract=collection.contract_address,
+                block=block.number,
+                error="maxSupply() returned 0",
+            )
+        if not max_supply:
+            supply = max_supply = None  # no progress to show
         minted_per_tx: dict[str, int] = defaultdict(int)
         for mint in mints:
             minted_per_tx[mint.tx_hash] += 1
@@ -568,7 +589,7 @@ class ChainReader:
                 chain=self.chain,
                 token_image_url=token_image_url(collection, str(mint.token_id)),
                 price_native=price_per_token[mint.tx_hash],
-                progress_number=supply - later_mints,
+                progress_number=supply - later_mints if supply is not None else None,
                 max_supply=max_supply,
                 transaction_hash=mint.tx_hash,
                 block_number=block.number,

@@ -193,7 +193,7 @@ def create_mint_card(
                 (
                     "Progress",
                     _progress_bar(event.progress_number, event.max_supply)
-                    if event.progress_number is not None and event.max_supply is not None
+                    if event.progress_number is not None and event.max_supply
                     else None,
                 ),
             ),

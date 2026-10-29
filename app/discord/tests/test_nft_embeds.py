@@ -62,6 +62,14 @@ async def test_mint_card_shows_image_token_progress_and_both_links() -> None:
     assert card.buttons == [("Transaction", TX_URL), ("Mint yours", MINT_URL)]
 
 
+async def test_mint_card_omits_progress_when_unknown_or_max_supply_is_zero() -> None:
+    for overrides in ({"progress_number": None, "max_supply": None}, {"max_supply": 0}):
+        card = Card(create_mint_card([mint_event(**overrides)], "DragonZ", MINT_URL))
+
+        assert card.values("Progress") == []
+        assert "## DragonZ #42" in card.text
+
+
 async def test_mint_without_mint_url_has_no_mint_yours_button() -> None:
     card = Card(create_mint_card([mint_event()], "DragonZ", None))
 

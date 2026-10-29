@@ -3,11 +3,13 @@
 import asyncio
 from dataclasses import replace
 from datetime import UTC, datetime
+from typing import Any
 
 import pytest
+from structlog.testing import capture_logs
 
-from app.chain.reader import POLL_INTERVAL_SECONDS
-from app.chain.rpc import SubscriptionError
+from app.chain.reader import MAX_SUPPLY_SELECTOR, POLL_INTERVAL_SECONDS
+from app.chain.rpc import ChainConnectionError, RpcResponseError, SubscriptionError
 from app.chain.tests.conftest import (
     MAIN_CHANNEL,
     SECOND_CONTRACT,
@@ -16,14 +18,18 @@ from app.chain.tests.conftest import (
     Bot,
     StopTest,
     block_time,
+    build_bot,
     mint_log,
     sepolia_collection,
+    transfer_log,
 )
 from app.core.store import PostStatus
 from app.discord.tests.card_view import Card
 
 TX_A = "0x" + "a1" * 32
 TX_B = "0x" + "b2" * 32
+HOLDER = "0x00000000000000000000000000000000000000d2"
+OTHER = "0x00000000000000000000000000000000000000e3"
 
 
 async def start_at(bot: Bot, block: int) -> None:
@@ -313,3 +319,111 @@ async def test_collection_without_image_template_posts_without_image(bot: Bot) -
     [card] = bot.discord.messages(TEST_CHANNEL)
     assert card.images == []
     assert bot.mint_statuses() == [PostStatus.POSTED]
+
+
+def reject_calls(bot: Bot, selector: str) -> None:
+    """Make the node answer a JSON-RPC error to an eth_call with this selector."""
+    original = bot.alchemy.request
+
+    async def request(method: str, params: list[Any]) -> Any:
+        if method == "eth_call" and params[0]["data"] == selector:
+            raise RpcResponseError("eth_call returned an error: execution reverted")
+        return await original(method, params)
+
+    bot.alchemy.request = request  # type: ignore[method-assign]
+
+
+async def test_max_supply_error_posts_the_mint_without_progress_and_logs(bot: Bot) -> None:
+    await start_at(bot, 100)
+    bot.alchemy.head = 101
+    bot.alchemy.logs = [mint_log(TEST_CONTRACT, 7, 101, TX_A, 0)]
+    reject_calls(bot, MAX_SUPPLY_SELECTOR)
+
+    with capture_logs() as logs:
+        await bot.reader.connect_once()
+
+    [card] = bot.discord.messages(TEST_CHANNEL)
+    assert "#7" in card.text
+    assert card.values("Progress") == []
+    assert bot.mint_statuses() == [PostStatus.POSTED]
+    assert (await bot.store.get_cursor("base-sepolia")).last_block == 101
+    [entry] = [e for e in logs if e["event"] == "chain.mint.supply_unreadable"]
+    assert entry["log_level"] == "error"
+    assert entry["contract"] == TEST_CONTRACT
+    assert entry["block"] == 101
+
+
+async def test_zero_max_supply_posts_the_mint_without_progress(bot: Bot) -> None:
+    await start_at(bot, 100)
+    bot.alchemy.head = 101
+    bot.alchemy.max_supply = 0
+    bot.alchemy.logs = [mint_log(TEST_CONTRACT, 7, 101, TX_A, 0)]
+
+    await bot.reader.connect_once()
+
+    [card] = bot.discord.messages(TEST_CHANNEL)
+    assert card.values("Progress") == []
+    assert bot.mint_statuses() == [PostStatus.POSTED]
+
+
+async def test_transport_failure_reading_supply_still_retries_the_block(bot: Bot) -> None:
+    await start_at(bot, 100)
+    bot.alchemy.head = 101
+    bot.alchemy.logs = [mint_log(TEST_CONTRACT, 7, 101, TX_A, 0)]
+    original = bot.alchemy.request
+
+    async def request(method: str, params: list[Any]) -> Any:
+        if method == "eth_call":
+            raise ChainConnectionError("down")
+        return await original(method, params)
+
+    bot.alchemy.request = request  # type: ignore[method-assign]
+
+    with pytest.raises(ChainConnectionError):
+        await bot.reader.connect_once()
+
+    assert bot.discord.messages(TEST_CHANNEL) == []
+    assert (await bot.store.get_cursor("base-sepolia")).last_block == 100
+
+
+@pytest.mark.parametrize(
+    "null_method", ["eth_getTransactionByHash", "eth_getBlockByNumber", "eth_getTransactionReceipt"]
+)
+async def test_null_result_is_a_transient_failure_that_leaves_the_cursor(
+    bot: Bot, null_method: str
+) -> None:
+    chain = "base-sepolia"
+    if null_method == "eth_getTransactionReceipt":
+        # Receipts are only read to detect sales, which the sepolia test contract never has
+        chain = "base"
+        bot = await build_bot(
+            chain,
+            sepolia_collection(
+                chain=chain,
+                contract_address=SECOND_CONTRACT,
+                track_marketplace=True,
+                marketplaces=("forum_one",),
+            ),
+        )
+        log = transfer_log(SECOND_CONTRACT, 7, 101, TX_A, 0, sender=HOLDER, recipient=OTHER)
+    else:
+        log = mint_log(TEST_CONTRACT, 7, 101, TX_A, 0)
+    await bot.store.set_cursor(chain, 100, datetime.fromtimestamp(block_time(100), UTC))
+    bot.alchemy.head = 101
+    bot.alchemy.logs = [log]
+    bot.alchemy.tx_values_wei = {TX_A: 1}
+    original = bot.alchemy.request
+
+    async def request(method: str, params: list[Any]) -> Any:
+        if method == null_method and params[0] != "latest":
+            return None
+        return await original(method, params)
+
+    bot.alchemy.request = request  # type: ignore[method-assign]
+
+    with pytest.raises(ChainConnectionError) as raised:
+        await bot.reader.connect_once()
+
+    assert not isinstance(raised.value, RpcResponseError)
+    assert null_method in str(raised.value)
+    assert (await bot.store.get_cursor(chain)).last_block == 100
