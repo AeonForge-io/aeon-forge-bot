@@ -89,6 +89,7 @@ class FakeAlchemy:
     tx_values_wei: dict[str, int] = field(default_factory=dict)
     receipts: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
     erc20s: dict[str, tuple[str, int]] = field(default_factory=dict)
+    tx_inputs: dict[str, str] = field(default_factory=dict)
     initial_supply: int = 0
     max_supply: int = 750
     notifications: list[dict[str, Any]] = field(default_factory=list)
@@ -132,7 +133,11 @@ class FakeAlchemy:
             )
             return hex(self.initial_supply + minted)
         if method == "eth_getTransactionByHash":
-            return {"hash": params[0], "value": hex(self.tx_values_wei.get(params[0], 0))}
+            return {
+                "hash": params[0],
+                "value": hex(self.tx_values_wei.get(params[0], 0)),
+                "input": self.tx_inputs.get(params[0], "0x"),
+            }
         if method == "eth_getTransactionReceipt":
             self.receipt_requests.append(params[0])
             return {"transactionHash": params[0], "logs": self.receipts.get(params[0], [])}

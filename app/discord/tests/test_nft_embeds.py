@@ -190,7 +190,7 @@ async def test_sale_card_for_another_marketplace_still_browses_forum_one() -> No
         token_image_url=IMAGE,
         seller_address=ADDRESS,
         buyer_address="0x1111111111111111111111111111111111111111",
-        marketplace="opensea",
+        marketplace="OpenSea",
         price_native=Decimal("0.5"),
         sale_id=TX_HASH,
         transaction_hash=TX_HASH,
