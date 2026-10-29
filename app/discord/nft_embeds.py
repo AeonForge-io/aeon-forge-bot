@@ -83,7 +83,7 @@ def _format_price(
     if price is None:
         return "N/A"
 
-    eth_str = f"{price:.4f}".rstrip("0").rstrip(".") + f" {currency or 'ETH'}"
+    eth_str = f"{price:.6f}".rstrip("0").rstrip(".") + f" {currency or 'ETH'}"
 
     if price_usd is not None:
         usd_str = f"${price_usd:,.2f}"

@@ -12,6 +12,7 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 
+from app.chain.element import ElementSale, element_sales
 from app.chain.forum_one import ForumOneSale, forum_one_sales
 from app.chain.rpc import Block, ChainConnectionError, ChainRpc, SubscriptionError, hex_to_int
 from app.chain.seaport import SeaportSale, name_seaport_sale, seaport_sales
@@ -32,6 +33,7 @@ from app.nft.models import (
 
 logger = get_logger(__name__)
 
+ELEMENT_MARKETPLACE = "Element"
 ERC721_TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
 TOTAL_SUPPLY_SELECTOR = "0x18160ddd"
 MAX_SUPPLY_SELECTOR = "0xd5abeb01"
@@ -269,11 +271,14 @@ class ChainReader:
 
         A transfer that is part of a sale is kept as skipped: the sale is what gets posted.
         """
-        sale: ForumOneSale | SeaportSale | None = await self._forum_one_sale(
+        sale: ForumOneSale | ElementSale | SeaportSale | None = await self._forum_one_sale(
             collection, transfer, receipts
         )
         if sale is not None:
             await self._store_sale(block, collection, transfer, sale, FORUM_ONE_MARKETPLACE)
+        elif (element := await self._element_sale(collection, transfer, receipts)) is not None:
+            sale = element
+            await self._store_sale(block, collection, transfer, element, ELEMENT_MARKETPLACE)
         else:
             seaport = await self._seaport_sale(collection, transfer, receipts)
             if seaport is not None:
@@ -331,6 +336,23 @@ class ChainReader:
             None,
         )
 
+    async def _element_sale(
+        self,
+        collection: Collection,
+        transfer: TransferLog,
+        receipts: dict[str, list[dict[str, Any]]],
+    ) -> ElementSale | None:
+        if collection.chain not in FORUM_ONE_CHAIN_IDS or not collection.track_marketplace:
+            return None  # ElementEx's address is Base's; test contracts are never decoded
+        return next(
+            (
+                sale
+                for sale in element_sales(await self._receipt_logs(transfer, receipts))
+                if sale.asset_contract == transfer.contract and sale.token_id == transfer.token_id
+            ),
+            None,
+        )
+
     async def _seaport_sale(
         self,
         collection: Collection,
@@ -353,7 +375,7 @@ class ChainReader:
         block: Block,
         collection: Collection,
         transfer: TransferLog,
-        sale: ForumOneSale | SeaportSale,
+        sale: ForumOneSale | ElementSale | SeaportSale,
         marketplace: str,
     ) -> None:
         if sale.currency == ZERO_ADDRESS:
