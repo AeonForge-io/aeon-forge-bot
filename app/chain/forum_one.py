@@ -3,6 +3,8 @@
 from dataclasses import dataclass
 from typing import Any
 
+from app.chain.abi import word_hex
+
 FORUM_ONE_PROXY = "0x167afc814c5614c33b7140f6095a784b1f562582"
 
 # keccak256 of each event signature in forumone-smart-contracts IForumOne.sol, mapped to the
@@ -35,8 +37,7 @@ def forum_one_sales(receipt_logs: list[dict[str, Any]]) -> list[ForumOneSale]:
         topics = log["topics"]
         if log["address"].lower() != FORUM_ONE_PROXY or topics[0] not in TOTAL_PRICE_WORD:
             continue
-        data = log["data"].removeprefix("0x")
-        words = [data[i : i + 64] for i in range(0, len(data), 64)]
+        words = word_hex(log["data"])
         price_word = TOTAL_PRICE_WORD[topics[0]]
         sales.append(
             ForumOneSale(

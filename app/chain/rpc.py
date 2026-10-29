@@ -158,6 +158,12 @@ class ChainRpc:
         tx = await self.transport.request("eth_getTransactionByHash", [tx_hash])
         return hex_to_int(tx["value"])
 
+    async def transaction_input(self, tx_hash: str) -> str:
+        """The calldata (0x hex) a transaction was sent with."""
+        tx = await self.transport.request("eth_getTransactionByHash", [tx_hash])
+        calldata: str = tx["input"]
+        return calldata
+
     async def transaction_logs(self, tx_hash: str) -> list[dict[str, Any]]:
         """The logs of a transaction's receipt."""
         receipt = await self.transport.request("eth_getTransactionReceipt", [tx_hash])

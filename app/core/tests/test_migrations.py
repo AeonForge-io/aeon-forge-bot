@@ -95,7 +95,19 @@ async def test_seed_rows(pg_client: DatabaseClient) -> None:
     assert await pg_client.list_company_wallets() == []
 
     marks = {(m.kind, m.value): m for m in await pg_client.list_marketplace_marks()}
-    assert len(marks) == 15
+    assert set(marks) == {
+        ("fee_wallet", "0x0000a26b00c1f0df003000390027140000faa719"),
+        ("zone", "0x000000e7ec00e7b300774b00001314b8610022b8"),
+        ("zone", "0x110b2b128a9ed1be5ef3232d8e4e41640df5c2cd"),
+        ("zone", "0x000056f7000000ece9003ca63978907a00ffd100"),
+        ("calldata_tag", "0x360c6ebe"),
+        ("zone", "0x2de95b9afd737b0814e5e6013593a9437c5532d5"),
+        ("zone", "0xdf2d4bffec010debd302674c9fb9cda99bb5e852"),
+    }
+    # the aggregator calldata tags are removed: a tag hit would mislabel an aggregator-routed fill
+    assert {m.marketplace for m in marks.values()} == {"OpenSea", "OKX"}
+    seen_on_base = "checked on Base 2026-10-28 (aeon-forge-bot#13)"
+    assert marks[("zone", "0xdf2d4bffec010debd302674c9fb9cda99bb5e852")].note == seen_on_base
     assert marks[("calldata_tag", "0x360c6ebe")].marketplace == "OpenSea"
     assert marks[("fee_wallet", "0x0000a26b00c1f0df003000390027140000faa719")].marketplace == (
         "OpenSea"

@@ -58,24 +58,13 @@ CHAIN_NAMES: dict[str, str] = {
 FORUM_ONE_COLLECTION_URL = "https://forumone.io/collection/8453/{contract_address}"
 FORUM_ONE_NFT_URL = "https://forumone.io/token/8453/{contract_address}/{token_id}"
 
-# Marketplace display name mapping
-MARKETPLACE_DISPLAY_NAMES: dict[str, str] = {
-    "magic_eden": "Magic Eden",
-    "opensea": "OpenSea",
-    "blur": "Blur",
-}
+# Internal marketplace ids; any other value is already a display name (from marketplace_marks)
+MARKETPLACE_DISPLAY_NAMES: dict[str, str] = {"forum_one": "Forum One"}
 
 
 def _format_marketplace(marketplace: str) -> str:
-    """Format marketplace identifier for display.
-
-    Args:
-        marketplace: Internal marketplace identifier (e.g., 'magic_eden')
-
-    Returns:
-        Human-readable marketplace name (e.g., 'Magic Eden')
-    """
-    return MARKETPLACE_DISPLAY_NAMES.get(marketplace, marketplace.replace("_", " ").title())
+    """The display name of a sale's or listing's marketplace."""
+    return MARKETPLACE_DISPLAY_NAMES.get(marketplace, marketplace)
 
 
 def _format_price(
