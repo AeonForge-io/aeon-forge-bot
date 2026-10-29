@@ -13,6 +13,9 @@ import aiohttp
 from app.nft.metadata import alchemy_rpc_url
 from app.shared.exceptions import AeonForgeBotError
 
+SYMBOL_SELECTOR = "0x95d89b41"
+DECIMALS_SELECTOR = "0x313ce567"
+
 
 class ChainConnectionError(AeonForgeBotError):
     """The Alchemy connection failed or dropped; the caller reconnects."""
@@ -93,6 +96,14 @@ class AlchemyTransport:
 
 
 @dataclass(frozen=True)
+class Coin:
+    """An ERC-20's symbol and decimals."""
+
+    symbol: str
+    decimals: int
+
+
+@dataclass(frozen=True)
 class Block:
     """A block's number and time."""
 
@@ -110,6 +121,7 @@ class ChainRpc:
 
     def __init__(self, transport: Transport) -> None:
         self.transport = transport
+        self._erc20_coins: dict[str, Coin] = {}
 
     async def block(self, number: int | None = None) -> Block:
         """A block by number, or the head when number is None."""
@@ -130,10 +142,14 @@ class ChainRpc:
         logs: list[dict[str, Any]] = await self.transport.request("eth_getLogs", [log_filter])
         return logs
 
-    async def call_uint(self, to: str, selector: str, block_number: int) -> int:
+    async def call_uint(self, to: str, selector: str, block_number: int | str) -> int:
         """eth_call a no-argument function returning one uint256, at a block."""
         result = await self.transport.request(
-            "eth_call", [{"to": to, "data": selector}, hex(block_number)]
+            "eth_call",
+            [
+                {"to": to, "data": selector},
+                block_number if isinstance(block_number, str) else hex(block_number),
+            ],
         )
         return hex_to_int(result)
 
@@ -141,3 +157,27 @@ class ChainRpc:
         """The ETH value (wei) sent with a transaction."""
         tx = await self.transport.request("eth_getTransactionByHash", [tx_hash])
         return hex_to_int(tx["value"])
+
+    async def transaction_logs(self, tx_hash: str) -> list[dict[str, Any]]:
+        """The logs of a transaction's receipt."""
+        receipt = await self.transport.request("eth_getTransactionReceipt", [tx_hash])
+        logs: list[dict[str, Any]] = receipt["logs"]
+        return logs
+
+    async def erc20_coin(self, token: str) -> Coin:
+        """An ERC-20's symbol() and decimals(), read once per token and cached."""
+        if token not in self._erc20_coins:
+            symbol_result = await self.transport.request(
+                "eth_call", [{"to": token, "data": SYMBOL_SELECTOR}, "latest"]
+            )
+            raw = bytes.fromhex(symbol_result.removeprefix("0x"))
+            length = int.from_bytes(raw[32:64], "big")
+            if len(raw) < 64 + length or length == 0:
+                raise ChainConnectionError(
+                    f"ERC-20 {token} symbol() is not an ABI string: {symbol_result!r}"
+                )
+            self._erc20_coins[token] = Coin(
+                raw[64 : 64 + length].decode(),
+                await self.call_uint(token, DECIMALS_SELECTOR, "latest"),
+            )
+        return self._erc20_coins[token]

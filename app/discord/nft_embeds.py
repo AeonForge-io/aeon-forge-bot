@@ -286,7 +286,7 @@ def create_listing_card(
 def create_sale_card(
     event: NFTSaleEvent, collection_name: str, chain: str, contract_address: str
 ) -> ui.LayoutView:
-    """Create the card for a sale; sale_id is the transaction hash."""
+    """Create the card for a sale."""
     title_name = event.token_name or f"{collection_name} #{event.token_id}"
     section = (
         title_name,
@@ -295,10 +295,12 @@ def create_sale_card(
         _lines(
             ("Seller", event.short_seller_address),
             ("Buyer", event.short_buyer_address),
-            ("Price", _format_price(event.price_native, event.price_usd)),
+            ("Price", _format_price(event.price_native, event.price_usd, event.currency)),
             ("Marketplace", _format_marketplace(event.marketplace)),
             ("Rarity", f"#{event.rarity_rank}" if event.rarity_rank else None),
         ),
     )
-    buttons = _transaction_button(chain, event.sale_id) + _browse_button(chain, contract_address)
+    buttons = _transaction_button(chain, event.transaction_hash) + _browse_button(
+        chain, contract_address
+    )
     return _card(SALE_COLOR, [section], buttons)

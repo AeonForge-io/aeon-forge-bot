@@ -344,6 +344,10 @@ class DatabaseClient:
         rows = await self._pending("list_pending_burns", EventKind.BURN)
         return [(r["id"], NFTBurnEvent.model_validate(dict(r))) for r in rows]
 
+    async def list_pending_sales(self) -> list[tuple[int, NFTSaleEvent]]:
+        rows = await self._pending("list_pending_sales", EventKind.SALE)
+        return [(r["id"], NFTSaleEvent.model_validate(dict(r))) for r in rows]
+
     async def list_pending_listings(self) -> list[tuple[int, NFTListingEvent]]:
         rows = await self._pending("list_pending_listings", EventKind.LISTING)
         return [(r["id"], NFTListingEvent.model_validate(dict(r))) for r in rows]

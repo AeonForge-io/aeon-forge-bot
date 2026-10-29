@@ -12,7 +12,13 @@ from app.core.logging import get_logger
 from app.core.settings_reload import SettingsReloader
 from app.core.store import Collection, EventKind, PostStatus, Store
 from app.discord.nft_poster import MAX_EMBEDS_PER_MESSAGE, NFTPoster
-from app.nft.models import NFTBurnEvent, NFTListingEvent, NFTMintEvent, NFTTransferEvent
+from app.nft.models import (
+    NFTBurnEvent,
+    NFTListingEvent,
+    NFTMintEvent,
+    NFTSaleEvent,
+    NFTTransferEvent,
+)
 from app.shared.exceptions import DiscordAPIError
 
 logger = get_logger(__name__)
@@ -21,7 +27,7 @@ EXPIRY_AFTER = timedelta(hours=6)
 
 
 class EventPublisher:
-    """Posts mints, transfers, burns and listings, and records that they were posted."""
+    """Posts mints, transfers, burns, sales and listings, and records that they were posted."""
 
     def __init__(
         self,
@@ -91,6 +97,21 @@ class EventPublisher:
             return
         await self.store.set_post_status(EventKind.BURN, event_id, PostStatus.POSTED)
 
+    async def post_sale(self, collection: Collection, event_id: int, event: NFTSaleEvent) -> None:
+        """Post a sale."""
+        try:
+            await self.poster.post_sale(
+                event,
+                collection.name,
+                collection.discord_channel_id,
+                collection.chain,
+                collection.contract_address,
+            )
+        except DiscordAPIError as e:
+            logger.error("post.sale.failed", collection=collection.collection_id, error=str(e))
+            return
+        await self.store.set_post_status(EventKind.SALE, event_id, PostStatus.POSTED)
+
     async def post_listing(
         self, collection: Collection, event_id: int, event: NFTListingEvent
     ) -> None:
@@ -114,6 +135,7 @@ class EventPublisher:
         mints = await self.store.list_pending_mints()
         transfers = await self.store.list_pending_transfers()
         burns = await self.store.list_pending_burns()
+        sales = await self.store.list_pending_sales()
         listings = await self.store.list_pending_listings()
 
         live_mints: dict[int, list[tuple[int, NFTMintEvent]]] = defaultdict(list)
@@ -138,6 +160,12 @@ class EventPublisher:
                 await self._expire(EventKind.BURN, event_id, burn.token_id)
             elif (collection := self._collection(burn.collection_id, "burn")) is not None:
                 await self.post_burn(collection, event_id, burn)
+
+        for event_id, sale in sales:
+            if sale.event_timestamp < oldest:
+                await self._expire(EventKind.SALE, event_id, sale.token_id)
+            elif (collection := self._collection(sale.collection_id, "sale")) is not None:
+                await self.post_sale(collection, event_id, sale)
 
         for event_id, listing in listings:
             if listing.event_timestamp < oldest:
