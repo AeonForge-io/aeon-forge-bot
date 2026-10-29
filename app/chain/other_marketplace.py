@@ -50,17 +50,15 @@ def erc20_payment(receipt_logs: list[dict[str, Any]], seller: str, buyer: str) -
 def trace_payment(trace: dict[str, Any], seller: str, buyer: str) -> Payment | None:
     """The ETH payment in a callTracer trace, or None when no value call reaches the seller.
 
-    The price is the value the buyer's wallet sent out; if only others paid, it is what the
-    seller received.
+    The price is the value the buyer's wallet sent out; with none from the buyer, it is no sale.
     """
     value_calls = _value_calls(trace)
-    received = sum(value for _, to, value in value_calls if to == seller)
-    if not received:
+    if not any(to == seller for _, to, _ in value_calls):
         return None
     from_buyer = sum(value for sender, _, value in value_calls if sender == buyer)
-    if from_buyer:
-        return Payment(ZERO_ADDRESS, from_buyer, seller_received=False)
-    return Payment(ZERO_ADDRESS, received, seller_received=True)
+    if not from_buyer:
+        return None
+    return Payment(ZERO_ADDRESS, from_buyer, seller_received=False)
 
 
 def _value_calls(call: dict[str, Any]) -> list[tuple[str, str, int]]:

@@ -4,7 +4,7 @@ from typing import Any
 
 from app.chain.abi import TRANSFER_TOPIC, address
 from app.chain.abi import words as abi_words
-from app.chain.forum_one import ForumOneSale
+from app.chain.forum_one import DecodedSale
 from app.nft.models import ZERO_ADDRESS
 
 EXCHANGE_META_V2 = "0x6c65a3c3aa67b126e43f86da85775e0f5e9743f7"
@@ -22,7 +22,7 @@ def rarible_sale(
     seller: str,
     buyer: str,
     transfer_log_index: int,
-) -> ForumOneSale | None:
+) -> DecodedSale | None:
     """The sale a receipt's Match event made of the given token, or None without a Match.
 
     Match names no token, seller, buyer or coin, so the caller supplies the token and its
@@ -38,7 +38,7 @@ def rarible_sale(
             continue
         data = abi_words(log["data"])
         left, right = data[LEFT_FILL_WORD], data[RIGHT_FILL_WORD]
-        return ForumOneSale(
+        return DecodedSale(
             asset_contract=contract,
             token_id=token_id,
             seller=seller,

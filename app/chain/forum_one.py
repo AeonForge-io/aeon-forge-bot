@@ -19,8 +19,8 @@ TOTAL_PRICE_WORD: dict[str, int] = {
 
 
 @dataclass(frozen=True)
-class ForumOneSale:
-    """One token sold through the Forum One proxy; the currency is an address (zero is ETH)."""
+class DecodedSale:
+    """One decoded token sale; the currency is an address (zero is ETH)."""
 
     asset_contract: str
     token_id: int
@@ -30,7 +30,7 @@ class ForumOneSale:
     currency: str
 
 
-def forum_one_sales(receipt_logs: list[dict[str, Any]]) -> list[ForumOneSale]:
+def forum_one_sales(receipt_logs: list[dict[str, Any]]) -> list[DecodedSale]:
     """The sales among a receipt's logs, from the Forum One proxy's own events only."""
     sales = []
     for log in receipt_logs:
@@ -40,7 +40,7 @@ def forum_one_sales(receipt_logs: list[dict[str, Any]]) -> list[ForumOneSale]:
         words = word_hex(log["data"])
         price_word = TOTAL_PRICE_WORD[topics[0]]
         sales.append(
-            ForumOneSale(
+            DecodedSale(
                 asset_contract="0x" + words[0][-40:],
                 token_id=int(words[1], 16),
                 seller="0x" + topics[2][-40:],
