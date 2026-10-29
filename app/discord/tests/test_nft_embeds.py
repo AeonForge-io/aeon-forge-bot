@@ -244,3 +244,36 @@ async def test_price_shows_up_to_six_decimals_and_drops_trailing_zeros() -> None
     assert price_of("0.00025") == ["0.00025 ETH"]
     assert price_of("0.1234567") == ["0.123457 ETH"]
     assert price_of("2.000000") == ["2 ETH"]
+
+
+async def test_listing_card_strips_markdown_and_links_from_the_symbol() -> None:
+    event = NFTListingEvent(
+        collection_id=1,
+        token_id="42",
+        seller_address=ADDRESS,
+        marketplace="forum_one",
+        price_native=Decimal("1"),
+        currency="[x](https://phish.example) @everyone",
+        listing_id="0xorder",
+        event_timestamp=NOW,
+    )
+    card = Card(create_listing_card(event, "DragonZ", "base", CONTRACT))
+
+    [price] = card.values("Price")
+    assert price == "1 xhttpsphish"
+
+
+async def test_listing_card_with_nothing_safe_in_the_symbol_says_tokens() -> None:
+    event = NFTListingEvent(
+        collection_id=1,
+        token_id="42",
+        seller_address=ADDRESS,
+        marketplace="forum_one",
+        price_native=Decimal("1"),
+        currency="[]()",
+        listing_id="0xorder",
+        event_timestamp=NOW,
+    )
+    card = Card(create_listing_card(event, "DragonZ", "base", CONTRACT))
+
+    assert card.values("Price") == ["1 tokens"]

@@ -33,6 +33,7 @@ from app.core.store import Collection, PostStatus, Store
 from app.discord.event_publisher import EventPublisher
 from app.marketplace.forum_one import FORUM_ONE_CHAIN_IDS
 from app.marketplace.forum_one import MARKETPLACE as FORUM_ONE_MARKETPLACE
+from app.nft.coin_symbol import coin_label
 from app.nft.metadata import token_image_url
 from app.nft.models import (
     ZERO_ADDRESS,
@@ -497,7 +498,7 @@ class ChainReader:
             symbol, decimals = "ETH", 18
         else:
             coin = await self.rpc.erc20_coin(sale.currency)
-            symbol, decimals = coin.symbol, coin.decimals
+            symbol, decimals = coin_label(sale.currency, coin.symbol), coin.decimals
         return _FoundSale(sale, marketplace, seller_received, symbol, decimals)
 
     async def _store_sale(

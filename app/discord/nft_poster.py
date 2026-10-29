@@ -27,6 +27,7 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 MAX_EMBEDS_PER_MESSAGE = 10
+NO_MENTIONS = discord.AllowedMentions.none()
 
 
 class NFTPoster:
@@ -85,7 +86,10 @@ class NFTPoster:
         """
         try:
             channel = await self._get_channel(channel_id)
-            await channel.send(view=create_mint_card(events, collection_name, mint_url))
+            await channel.send(
+                view=create_mint_card(events, collection_name, mint_url),
+                allowed_mentions=NO_MENTIONS,
+            )
 
             logger.info(
                 "nft.post.mint.success",
@@ -125,7 +129,8 @@ class NFTPoster:
         try:
             channel = await self._get_channel(channel_id)
             await channel.send(
-                view=create_transfer_card(event, collection_name, contract_address, from_label)
+                view=create_transfer_card(event, collection_name, contract_address, from_label),
+                allowed_mentions=NO_MENTIONS,
             )
 
             logger.info(
@@ -163,7 +168,10 @@ class NFTPoster:
         """
         try:
             channel = await self._get_channel(channel_id)
-            await channel.send(view=create_burn_card(event, collection_name, contract_address))
+            await channel.send(
+                view=create_burn_card(event, collection_name, contract_address),
+                allowed_mentions=NO_MENTIONS,
+            )
 
             logger.info(
                 "nft.post.burn.success",
@@ -203,7 +211,8 @@ class NFTPoster:
         try:
             channel = await self._get_channel(channel_id)
             await channel.send(
-                view=create_listing_card(event, collection_name, chain, contract_address)
+                view=create_listing_card(event, collection_name, chain, contract_address),
+                allowed_mentions=NO_MENTIONS,
             )
 
             logger.info(
@@ -245,7 +254,8 @@ class NFTPoster:
         try:
             channel = await self._get_channel(channel_id)
             await channel.send(
-                view=create_sale_card(event, collection_name, chain, contract_address)
+                view=create_sale_card(event, collection_name, chain, contract_address),
+                allowed_mentions=NO_MENTIONS,
             )
 
             logger.info(

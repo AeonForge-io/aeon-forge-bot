@@ -342,3 +342,51 @@ async def test_other_marketplace_sales_are_not_decoded_off_base() -> None:
 
     assert bot.alchemy.receipt_requests == []
     assert bot.store.events[EventKind.SALE] == []
+
+
+FAKE_USDC = "0x00000000000000000000000000000000000012f7"
+LINK_COIN = "0x1234567890abcdef1234567890abcdef0000abcd"
+WETH = "0x4200000000000000000000000000000000000006"
+
+
+async def test_a_contract_calling_itself_usdc_shows_as_unverified_with_its_address(
+    base_bot: Bot,
+) -> None:
+    base_bot.alchemy.erc20s[FAKE_USDC] = ("USDC", 6)
+    base_bot.alchemy.receipts[TX_A] = [erc20_transfer(FAKE_USDC, BUYER, SELLER, 100 * 10**6)]
+
+    await read(base_bot)
+
+    [card] = base_bot.discord.messages(MAIN_CHANNEL)
+    assert card.values("Price") == ["100 USDC (unverified 0x0000…12f7)"]
+
+
+async def test_a_markdown_link_symbol_is_stripped_and_shown_as_unverified(
+    base_bot: Bot,
+) -> None:
+    base_bot.alchemy.erc20s[LINK_COIN] = ("[x](https://phish.example)", 6)
+    base_bot.alchemy.receipts[TX_A] = [erc20_transfer(LINK_COIN, BUYER, SELLER, 12 * 10**6)]
+
+    await read(base_bot)
+
+    [card] = base_bot.discord.messages(MAIN_CHANNEL)
+    assert card.values("Price") == ["12 xhttpsphish (unverified 0x1234…abcd)"]
+
+
+async def test_real_weth_shows_plainly_whatever_its_symbol_call_says(base_bot: Bot) -> None:
+    base_bot.alchemy.erc20s[WETH] = ("not-weth", 18)
+    base_bot.alchemy.receipts[TX_A] = [erc20_transfer(WETH, BUYER, SELLER, 2 * ETH)]
+
+    await read(base_bot)
+
+    [card] = base_bot.discord.messages(MAIN_CHANNEL)
+    assert card.values("Price") == ["2 WETH"]
+
+
+async def test_real_usdc_shows_plainly(base_bot: Bot) -> None:
+    base_bot.alchemy.receipts[TX_A] = [erc20_transfer(USDC, BUYER, SELLER, 5 * 10**6)]
+
+    await read(base_bot)
+
+    [card] = base_bot.discord.messages(MAIN_CHANNEL)
+    assert card.values("Price") == ["5 USDC"]

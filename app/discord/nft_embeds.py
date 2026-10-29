@@ -12,6 +12,7 @@ from app.discord.nft_event_colors import (
     SALE_COLOR,
     TRANSFER_COLOR,
 )
+from app.nft.coin_symbol import sanitize_symbol
 from app.nft.models import (
     NFTBurnEvent,
     NFTListingEvent,
@@ -254,13 +255,14 @@ def create_listing_card(
 ) -> ui.LayoutView:
     """Create the card for a marketplace listing (no transaction: listings are off-chain)."""
     title_name = event.token_name or f"{collection_name} #{event.token_id}"
+    listing_symbol = sanitize_symbol(event.currency) if event.currency else None
     section = (
         title_name,
         f"listed on {CHAIN_NAMES[chain]}",
         event.token_image_url,
         _lines(
             ("Seller", event.short_seller_address),
-            ("Price", _format_price(event.price_native, event.price_usd, event.currency)),
+            ("Price", _format_price(event.price_native, event.price_usd, listing_symbol)),
             ("Marketplace", _format_marketplace(event.marketplace)),
             ("Rarity", f"#{event.rarity_rank}" if event.rarity_rank else None),
         ),
