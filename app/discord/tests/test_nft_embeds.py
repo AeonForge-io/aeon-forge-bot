@@ -175,10 +175,7 @@ async def test_listing_card_links_the_token_and_names_the_marketplace() -> None:
     assert card.values("Price") == ["0.045 ETH"]
     assert card.values("Marketplace") == ["Forum One"]
     assert card.values("Rarity") == []
-    assert card.buttons == [
-        ("View on Forum One", f"https://forumone.io/token/8453/{CONTRACT}/42"),
-        ("Browse Forum One", BROWSE_URL),
-    ]
+    assert card.buttons == [("View on Forum One", f"https://forumone.io/token/8453/{CONTRACT}/42")]
 
 
 async def test_listing_card_shows_the_coin_it_is_priced_in() -> None:

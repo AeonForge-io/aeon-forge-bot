@@ -238,7 +238,7 @@ def create_listing_card(
         "View on Forum One",
         FORUM_ONE_NFT_URL.format(contract_address=contract_address, token_id=event.token_id),
     )
-    return _card(LISTING_COLOR, [section], [token_button, *_browse_button(chain, contract_address)])
+    return _card(LISTING_COLOR, [section], [token_button])
 
 
 def create_sale_card(
