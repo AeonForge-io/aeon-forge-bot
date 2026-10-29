@@ -12,13 +12,20 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 
+from app.chain.forum_one import FORUM_ONE_MARKETPLACE, ForumOneSale, forum_one_sales
 from app.chain.rpc import Block, ChainConnectionError, ChainRpc, SubscriptionError, hex_to_int
 from app.core.logging import get_logger
 from app.core.settings_reload import SettingsReloader
 from app.core.store import Collection, PostStatus, Store
 from app.discord.event_publisher import EventPublisher
 from app.nft.metadata import token_image_url
-from app.nft.models import ZERO_ADDRESS, NFTBurnEvent, NFTMintEvent, NFTTransferEvent
+from app.nft.models import (
+    ZERO_ADDRESS,
+    NFTBurnEvent,
+    NFTMintEvent,
+    NFTSaleEvent,
+    NFTTransferEvent,
+)
 
 logger = get_logger(__name__)
 
@@ -217,6 +224,8 @@ class ChainReader:
         by_contract: dict[str, list[TransferLog]] = defaultdict(list)
         for transfer in transfer_logs(logs):
             by_contract[transfer.contract].append(transfer)
+        # A receipt is fetched once per transaction, however many tracked tokens it moved
+        receipts: dict[str, list[ForumOneSale]] = {}
         for contract, transfers in by_contract.items():
             collection = self._collection(contract)
             if collection is None:
@@ -228,7 +237,7 @@ class ChainReader:
                 if transfer.recipient == ZERO_ADDRESS:
                     await self._store_burn(block, collection, transfer)
                 elif transfer.sender != ZERO_ADDRESS:
-                    await self._store_transfer(block, collection, transfer)
+                    await self._store_transfer(block, collection, transfer, receipts)
 
     async def _store_burn(self, block: Block, collection: Collection, burn: TransferLog) -> None:
         event = NFTBurnEvent(
@@ -247,12 +256,23 @@ class ChainReader:
             await self.publisher.post_burn(collection, event_id, event)
 
     async def _store_transfer(
-        self, block: Block, collection: Collection, transfer: TransferLog
+        self,
+        block: Block,
+        collection: Collection,
+        transfer: TransferLog,
+        receipts: dict[str, list[ForumOneSale]],
     ) -> None:
-        """Record a transfer; the mode decides whether it is posted or kept as skipped."""
+        """Record a transfer; the mode decides whether it is posted or kept as skipped.
+
+        A transfer that is part of a sale is kept as skipped: the sale is what gets posted.
+        """
+        sale = await self._forum_one_sale(collection, transfer, receipts)
+        if sale is not None:
+            await self._store_sale(block, collection, transfer, sale)
         is_company = self.reloader.current.company_label(transfer.sender) is not None
-        posts = collection.transfer_mode == "all" or (
-            collection.transfer_mode == "company" and is_company
+        posts = sale is None and (
+            collection.transfer_mode == "all"
+            or (collection.transfer_mode == "company" and is_company)
         )
         status = PostStatus.PENDING if posts else PostStatus.SKIPPED
         event = NFTTransferEvent(
@@ -269,6 +289,53 @@ class ChainReader:
         event_id = await self.store.insert_transfer(event, status)
         if event_id is not None and status is PostStatus.PENDING:
             await self.publisher.post_transfer(collection, event_id, event)
+
+    async def _forum_one_sale(
+        self,
+        collection: Collection,
+        transfer: TransferLog,
+        receipts: dict[str, list[ForumOneSale]],
+    ) -> ForumOneSale | None:
+        if not collection.track_marketplace or FORUM_ONE_MARKETPLACE not in collection.marketplaces:
+            return None
+        if transfer.tx_hash not in receipts:
+            receipts[transfer.tx_hash] = forum_one_sales(
+                await self.rpc.transaction_logs(transfer.tx_hash)
+            )
+        return next(
+            (
+                sale
+                for sale in receipts[transfer.tx_hash]
+                if sale.asset_contract == transfer.contract and sale.token_id == transfer.token_id
+            ),
+            None,
+        )
+
+    async def _store_sale(
+        self, block: Block, collection: Collection, transfer: TransferLog, sale: ForumOneSale
+    ) -> None:
+        if sale.currency == ZERO_ADDRESS:
+            symbol, decimals = "ETH", 18
+        else:
+            coin = await self.rpc.erc20_coin(sale.currency)
+            symbol, decimals = coin.symbol, coin.decimals
+        event = NFTSaleEvent(
+            collection_id=collection.id,
+            token_id=str(transfer.token_id),
+            token_image_url=token_image_url(collection, str(transfer.token_id)),
+            seller_address=sale.seller,
+            buyer_address=sale.buyer,
+            marketplace=FORUM_ONE_MARKETPLACE,
+            price_native=Decimal(sale.total_price) / Decimal(10) ** decimals,
+            currency=symbol,
+            sale_id=f"{transfer.tx_hash}:{transfer.token_id}",
+            transaction_hash=transfer.tx_hash,
+            event_timestamp=datetime.fromtimestamp(block.timestamp, UTC),
+        )
+        status = PostStatus.PENDING if collection.post_sales else PostStatus.SKIPPED
+        event_id = await self.store.insert_sale(event, status)
+        if event_id is not None and status is PostStatus.PENDING:
+            await self.publisher.post_sale(collection, event_id, event)
 
     def _collection(self, contract: str) -> Collection | None:
         for collection in self.reloader.current.collections:

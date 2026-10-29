@@ -15,7 +15,13 @@ from app.chain.reader import (
     TOTAL_SUPPLY_SELECTOR,
     ChainReader,
 )
-from app.chain.rpc import ChainConnectionError, ChainRpc, SubscriptionError
+from app.chain.rpc import (
+    DECIMALS_SELECTOR,
+    SYMBOL_SELECTOR,
+    ChainConnectionError,
+    ChainRpc,
+    SubscriptionError,
+)
 from app.core.memory_store import MemoryStore
 from app.core.settings_reload import SettingsReloader
 from app.core.store import Collection, EventKind, PostStatus
@@ -64,6 +70,12 @@ def mint_log(
 IMAGE_URL_TEMPLATE = "https://images.test/ipfs/cid/{token_id}.jpg"
 
 
+def abi_string(text: str) -> str:
+    """An ABI-encoded string return value."""
+    raw = text.encode()
+    return "0x" + f"{32:064x}" + f"{len(raw):064x}" + raw.hex().ljust(64, "0")
+
+
 class StopTest(Exception):
     """Raised by a fake to end a run() loop."""
 
@@ -75,6 +87,8 @@ class FakeAlchemy:
     head: int = 100
     logs: list[dict[str, Any]] = field(default_factory=list)
     tx_values_wei: dict[str, int] = field(default_factory=dict)
+    receipts: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
+    erc20s: dict[str, tuple[str, int]] = field(default_factory=dict)
     initial_supply: int = 0
     max_supply: int = 750
     notifications: list[dict[str, Any]] = field(default_factory=list)
@@ -82,6 +96,7 @@ class FakeAlchemy:
     subscription_error: SubscriptionError | None = None
     failing_requests: int = 0
     calls: list[str] = field(default_factory=list)
+    receipt_requests: list[str] = field(default_factory=list)
 
     async def request(self, method: str, params: list[Any]) -> Any:
         self.calls.append(method)
@@ -102,6 +117,10 @@ class FakeAlchemy:
             ]
         if method == "eth_call":
             call, block_hex = params
+            if call["data"] == SYMBOL_SELECTOR:
+                return abi_string(self.erc20s[call["to"]][0])
+            if call["data"] == DECIMALS_SELECTOR:
+                return hex(self.erc20s[call["to"]][1])
             if call["data"] == MAX_SUPPLY_SELECTOR:
                 return hex(self.max_supply)
             assert call["data"] == TOTAL_SUPPLY_SELECTOR
@@ -114,6 +133,9 @@ class FakeAlchemy:
             return hex(self.initial_supply + minted)
         if method == "eth_getTransactionByHash":
             return {"hash": params[0], "value": hex(self.tx_values_wei.get(params[0], 0))}
+        if method == "eth_getTransactionReceipt":
+            self.receipt_requests.append(params[0])
+            return {"transactionHash": params[0], "logs": self.receipts.get(params[0], [])}
         raise AssertionError(f"unexpected RPC {method}")
 
     async def subscribe_logs(self, log_filter: dict[str, Any]) -> AsyncIterator[dict[str, Any]]:
@@ -201,12 +223,11 @@ async def _no_change(chain: str, contracts: frozenset[str]) -> None:
     return None
 
 
-@pytest.fixture
-async def bot(monkeypatch: pytest.MonkeyPatch) -> Bot:
+async def build_bot(chain: str, collection: Collection) -> Bot:
     alchemy = FakeAlchemy()
     fake_discord = FakeDiscord()
     store = MemoryStore()
-    store.add_collection(sepolia_collection())
+    store.add_collection(collection)
     reloader = SettingsReloader(store, _no_change)
     await reloader.reload()
     sleeps: list[float] = []
@@ -224,7 +245,7 @@ async def bot(monkeypatch: pytest.MonkeyPatch) -> Bot:
         clock.now,
     )
     reader = ChainReader(
-        "base-sepolia",
+        chain,
         ChainRpc(alchemy),
         store,
         reloader,
@@ -232,3 +253,8 @@ async def bot(monkeypatch: pytest.MonkeyPatch) -> Bot:
         sleep=record_sleep,
     )
     return Bot(reader, alchemy, fake_discord, store, reloader, sleeps, publisher, clock)
+
+
+@pytest.fixture
+async def bot() -> Bot:
+    return await build_bot("base-sepolia", sepolia_collection())

@@ -174,6 +174,7 @@ async def test_sale_card_for_another_marketplace_still_browses_forum_one() -> No
         marketplace="opensea",
         price_native=Decimal("0.5"),
         sale_id=TX_HASH,
+        transaction_hash=TX_HASH,
         event_timestamp=NOW,
     )
     card = Card(create_sale_card(event, "DragonZ", "base", CONTRACT))
