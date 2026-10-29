@@ -85,9 +85,9 @@ def test_correlation_id_get_set() -> None:
 def test_logger_hybrid_dotted_namespace_format(capsys: pytest.CaptureFixture[str]) -> None:
     """Test that logger follows hybrid dotted namespace pattern."""
     setup_logging(log_level="INFO")
-    logger = get_logger("app.github.client")
+    logger = get_logger("app.core.database")
 
-    logger.info("github.api.request_started", endpoint="/repos/owner/repo")
+    logger.info("database.pool.created", min_size=2, max_size=5)
 
     captured = capsys.readouterr()
     log_line = captured.out.strip()
@@ -96,7 +96,7 @@ def test_logger_hybrid_dotted_namespace_format(capsys: pytest.CaptureFixture[str
     log_data = json.loads(log_line)
 
     # Verify event follows pattern: {domain}.{component}.{action_state}
-    assert log_data["event"] == "github.api.request_started"
+    assert log_data["event"] == "database.pool.created"
     assert "." in log_data["event"]  # Contains dots for namespace
 
 

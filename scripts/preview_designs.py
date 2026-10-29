@@ -3,7 +3,7 @@
 Usage: uv run python scripts/preview_designs.py [--type mint|batch|transfer|burn|listing|sale]
 
 Posts only to the test channel. Takes DISCORD_TOKEN from the environment, else from
-the nearest .env above this script (a worktree finds the main checkout's .env).
+the repo root's .env.
 """
 
 import argparse
@@ -15,8 +15,8 @@ from pathlib import Path
 
 import discord
 from discord import ui
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from app.core.config import Settings
 from app.discord.nft_embeds import (
     create_burn_card,
     create_listing_card,
@@ -122,7 +122,7 @@ def build_views() -> dict[str, ui.LayoutView]:
                 token_image_url=image,
                 seller_address=HOLDER,
                 buyer_address=BUYER,
-                marketplace="opensea",
+                marketplace="OpenSea",
                 price_native=Decimal("0.045"),
                 sale_id=TX_HASH,
                 transaction_hash=TX_HASH,
@@ -135,15 +135,25 @@ def build_views() -> dict[str, ui.LayoutView]:
     }
 
 
+REPO_ROOT = Path(__file__).resolve().parent.parent
+
+
+class TokenOnly(BaseSettings):
+    """Just the Discord token: the other secrets are not needed to post a preview."""
+
+    model_config = SettingsConfigDict(case_sensitive=False, extra="ignore")
+
+    discord_token: str
+
+
 def read_token() -> str:
     token = os.environ.get("DISCORD_TOKEN")
     if token:
         return token
-    for folder in Path(__file__).resolve().parents:
-        env_file = folder / ".env"
-        if env_file.is_file():
-            return Settings(_env_file=env_file).discord_token
-    raise SystemExit("Set DISCORD_TOKEN or provide a .env above this script")
+    env_file = REPO_ROOT / ".env"
+    if env_file.is_file():
+        return TokenOnly(_env_file=env_file).discord_token
+    raise SystemExit(f"Set DISCORD_TOKEN or provide {env_file}")
 
 
 async def post(kinds: list[str]) -> None:

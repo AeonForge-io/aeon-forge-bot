@@ -45,7 +45,6 @@ class NFTMintEvent(BaseModel):
         chain: Blockchain network (e.g., 'base', 'ethereum')
         token_image_url: NFT image URL (if available)
         price_native: Mint price in native currency (ETH)
-        price_usd: Mint price in USD (if available)
         transaction_hash: On-chain transaction hash
         block_number: Block number of the transaction
         event_timestamp: When the mint occurred
@@ -57,7 +56,6 @@ class NFTMintEvent(BaseModel):
     chain: str = Field(default="base", description="Blockchain network")
     token_image_url: str | None = Field(None, description="NFT image URL")
     price_native: Decimal | None = Field(None, description="Mint price in ETH")
-    price_usd: Decimal | None = Field(None, description="Mint price in USD")
     progress_number: int | None = Field(None, description="N in '#N of M'")
     max_supply: int | None = Field(None, description="M in '#N of M'")
     transaction_hash: str | None = Field(None, description="Transaction hash")
@@ -192,11 +190,8 @@ class NFTListingEvent(BaseModel):
         token_name: NFT name (if available)
         token_image_url: NFT image URL (if available)
         seller_address: Seller's address
-        marketplace: Marketplace name (magic_eden, opensea, rarible)
+        marketplace: Marketplace: the internal id 'forum_one', or a display name from marketplace_marks
         price_native: Listing price in native currency (ETH)
-        price_usd: Listing price in USD (if available)
-        floor_price_native: Collection floor price at listing time
-        rarity_rank: NFT rarity rank (if available)
         listing_id: Marketplace's unique listing ID
         event_timestamp: When the listing was created
     """
@@ -208,10 +203,7 @@ class NFTListingEvent(BaseModel):
     seller_address: str = Field(..., description="Seller address")
     marketplace: str = Field(..., description="Marketplace name")
     price_native: Decimal = Field(..., description="Price in ETH")
-    price_usd: Decimal | None = Field(None, description="Price in USD")
     currency: str | None = Field(None, description="Coin symbol of the price")
-    floor_price_native: Decimal | None = Field(None, description="Floor price in ETH")
-    rarity_rank: int | None = Field(None, description="Rarity rank")
     listing_id: str = Field(..., description="Marketplace listing ID")
     expires_at: datetime | None = Field(None, description="When the listing expires")
     event_timestamp: datetime = Field(..., description="Event timestamp")
@@ -238,13 +230,6 @@ class NFTListingEvent(BaseModel):
         """Get shortened seller_address for display."""
         return _short_address(self.seller_address)
 
-    @property
-    def floor_multiple(self) -> float | None:
-        """Calculate price as multiple of floor price."""
-        if self.floor_price_native and self.floor_price_native > 0:
-            return float(self.price_native / self.floor_price_native)
-        return None
-
 
 class NFTSaleEvent(BaseModel):
     """NFT sale event from marketplace.
@@ -256,11 +241,8 @@ class NFTSaleEvent(BaseModel):
         token_image_url: NFT image URL (if available)
         seller_address: Seller's address
         buyer_address: Buyer's address
-        marketplace: Marketplace name (magic_eden, opensea, rarible)
+        marketplace: Marketplace: the internal id 'forum_one', or a display name from marketplace_marks
         price_native: Sale price in native currency (ETH)
-        price_usd: Sale price in USD (if available)
-        floor_price_native: Collection floor price at sale time
-        rarity_rank: NFT rarity rank (if available)
         sale_id: Marketplace's unique sale/transaction ID
         event_timestamp: When the sale occurred
     """
@@ -273,13 +255,10 @@ class NFTSaleEvent(BaseModel):
     buyer_address: str = Field(..., description="Buyer address")
     marketplace: str = Field(..., description="Marketplace name")
     price_native: Decimal = Field(..., description="Price in ETH")
-    price_usd: Decimal | None = Field(None, description="Price in USD")
     currency: str | None = Field(None, description="Coin symbol of the price")
     seller_received: bool = Field(
         False, description="Price is what the seller got, not the buyer's gross"
     )
-    floor_price_native: Decimal | None = Field(None, description="Floor price in ETH")
-    rarity_rank: int | None = Field(None, description="Rarity rank")
     sale_id: str = Field(..., description="Marketplace sale ID")
     transaction_hash: str | None = Field(None, description="Transaction hash")
     event_timestamp: datetime = Field(..., description="Event timestamp")
@@ -309,10 +288,3 @@ class NFTSaleEvent(BaseModel):
     def short_buyer_address(self) -> str:
         """Get shortened buyer_address for display."""
         return _short_address(self.buyer_address)
-
-    @property
-    def floor_multiple(self) -> float | None:
-        """Calculate price as multiple of floor price."""
-        if self.floor_price_native and self.floor_price_native > 0:
-            return float(self.price_native / self.floor_price_native)
-        return None

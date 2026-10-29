@@ -98,6 +98,13 @@ async def test_ten_token_mint_fits_the_40_component_limit() -> None:
     assert len(card.items) <= 40
 
 
+async def test_ten_long_named_tokens_stay_under_the_4000_character_text_limit() -> None:
+    events = [mint_event(str(i)) for i in range(10)]
+    card = Card(create_mint_card(events, "A Very Long Collection Name " * 3, MINT_URL))
+
+    assert len(card.text) < 4000
+
+
 async def test_progress_bar_is_empty_at_zero_full_at_supply_and_clamped_beyond() -> None:
     events = [
         mint_event("1", progress_number=0),
@@ -158,7 +165,6 @@ async def test_listing_card_links_the_token_and_names_the_marketplace() -> None:
         seller_address=ADDRESS,
         marketplace="forum_one",
         price_native=Decimal("0.045"),
-        rarity_rank=12,
         listing_id="0xorder",
         event_timestamp=NOW,
     )
@@ -168,7 +174,7 @@ async def test_listing_card_links_the_token_and_names_the_marketplace() -> None:
     assert card.images == [IMAGE]
     assert card.values("Price") == ["0.045 ETH"]
     assert card.values("Marketplace") == ["Forum One"]
-    assert card.values("Rarity") == ["#12"]
+    assert card.values("Rarity") == []
     assert card.buttons == [
         ("View on Forum One", f"https://forumone.io/token/8453/{CONTRACT}/42"),
         ("Browse Forum One", BROWSE_URL),

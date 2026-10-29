@@ -68,14 +68,11 @@ def _format_marketplace(marketplace: str) -> str:
     return MARKETPLACE_DISPLAY_NAMES.get(marketplace, marketplace)
 
 
-def _format_price(
-    price: Decimal | None, price_usd: Decimal | None = None, currency: str | None = None
-) -> str:
-    """Format a price in its coin (ETH when currency is None) with optional USD value.
+def _format_price(price: Decimal | None, currency: str | None = None) -> str:
+    """Format a price in its coin (ETH when currency is None); no dollar values.
 
     Args:
         price: Price in the coin
-        price_usd: Optional USD value
         currency: Coin symbol, None for ETH
 
     Returns:
@@ -84,34 +81,7 @@ def _format_price(
     if price is None:
         return "N/A"
 
-    eth_str = f"{price:.6f}".rstrip("0").rstrip(".") + f" {currency or 'ETH'}"
-
-    if price_usd is not None:
-        usd_str = f"${price_usd:,.2f}"
-        return f"{eth_str} ({usd_str})"
-
-    return eth_str
-
-
-def _format_floor_comparison(price: Decimal, floor: Decimal | None) -> str | None:
-    """Format price as multiple of floor.
-
-    Args:
-        price: Event price
-        floor: Floor price
-
-    Returns:
-        Formatted comparison string, or None if no floor
-    """
-    if floor is None or floor <= 0:
-        return None
-
-    multiple = float(price / floor)
-    if multiple >= 1.0:
-        return f"{multiple:.1f}x floor"
-    else:
-        pct = (1 - multiple) * 100
-        return f"{pct:.0f}% below floor"
+    return f"{price:.6f}".rstrip("0").rstrip(".") + f" {currency or 'ETH'}"
 
 
 def _link_button(label: str, url: str) -> ui.Button[ui.LayoutView]:
@@ -187,9 +157,7 @@ def create_mint_card(
                 ("Minter", event.short_to_address),
                 (
                     "Price",
-                    _format_price(event.price_native, event.price_usd)
-                    if event.price_native is not None
-                    else None,
+                    _format_price(event.price_native) if event.price_native is not None else None,
                 ),
                 (
                     "Progress",
@@ -262,9 +230,8 @@ def create_listing_card(
         event.token_image_url,
         _lines(
             ("Seller", event.short_seller_address),
-            ("Price", _format_price(event.price_native, event.price_usd, listing_symbol)),
+            ("Price", _format_price(event.price_native, listing_symbol)),
             ("Marketplace", _format_marketplace(event.marketplace)),
-            ("Rarity", f"#{event.rarity_rank}" if event.rarity_rank else None),
         ),
     )
     token_button = _link_button(
@@ -288,10 +255,9 @@ def create_sale_card(
             ("Buyer", event.short_buyer_address),
             (
                 "Seller received" if event.seller_received else "Price",
-                _format_price(event.price_native, event.price_usd, event.currency),
+                _format_price(event.price_native, event.currency),
             ),
             ("Marketplace", _format_marketplace(event.marketplace)),
-            ("Rarity", f"#{event.rarity_rank}" if event.rarity_rank else None),
         ),
     )
     buttons = _transaction_button(chain, event.transaction_hash) + _browse_button(
