@@ -78,6 +78,9 @@ BACKOFF_MAX_SECONDS = 60.0
 POLLING_FALLBACK_CHAINS = frozenset({"base-sepolia"})
 POLL_INTERVAL_SECONDS = 30.0
 
+# A quiet subscription moves the cursor this often, so a restart does not read as a long gap
+CHECKPOINT_INTERVAL_SECONDS = 15 * 60
+
 # A lagging HTTP node may not serve a log the websocket node already announced
 LOG_LAG_RETRIES = 3
 LOG_LAG_DELAY_SECONDS = 2.0
@@ -115,6 +118,7 @@ class ChainReader:
         reloader: SettingsReloader,
         publisher: EventPublisher,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+        checkpoint_sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
         lag_retries: int = LOG_LAG_RETRIES,
         lag_delay: float = LOG_LAG_DELAY_SECONDS,
     ) -> None:
@@ -124,6 +128,7 @@ class ChainReader:
         self.reloader = reloader
         self.publisher = publisher
         self.sleep = sleep
+        self.checkpoint_sleep = checkpoint_sleep
         self.lag_retries = lag_retries
         self.lag_delay = lag_delay
         self.contracts = reloader.current.tracked_contracts.get(chain, frozenset())
@@ -179,7 +184,7 @@ class ChainReader:
         opened = asyncio.Event()
         live = asyncio.ensure_future(self._follow_subscription(opened))
         changed = asyncio.ensure_future(self._contracts_changed.wait())
-        gap = asyncio.ensure_future(self._catch_up_when_open(opened))
+        gap = asyncio.ensure_future(self._catch_up_then_checkpoint(opened))
         try:
             while not (live.done() or changed.done()):
                 waiting = {live, changed} | ({gap} if not gap.done() else set())
@@ -194,11 +199,18 @@ class ChainReader:
         if live.done() and not live.cancelled():
             live.result()
 
-    async def _catch_up_when_open(self, opened: asyncio.Event) -> None:
-        """Read the blocks between the first catch-up's head and the subscription's start."""
+    async def _catch_up_then_checkpoint(self, opened: asyncio.Event) -> None:
+        """Read the blocks between the first catch-up's head and the subscription's start.
+
+        Then, while the subscription stays open, move the cursor to the head every
+        CHECKPOINT_INTERVAL_SECONDS. A failed checkpoint ends the connection like any other.
+        """
         await opened.wait()
         await self.sync_to(await self.rpc.block())
         self._healthy = True
+        while True:
+            await self.checkpoint_sleep(CHECKPOINT_INTERVAL_SECONDS)
+            await self.sync_to(await self.rpc.block())
 
     async def _follow_subscription(self, opened: asyncio.Event) -> None:
         log_filter = {"address": sorted(self.contracts), "topics": [TRANSFER_TOPIC]}

@@ -534,3 +534,110 @@ async def test_log_at_a_block_the_cursor_already_passed_is_read_again(bot: Bot) 
     cursor = await bot.store.get_cursor("base-sepolia")
     assert cursor is not None
     assert cursor.last_block == 101
+
+
+class CheckpointClock:
+    """Stands in for the checkpoint sleep: each call waits until the test lets that wait end."""
+
+    def __init__(self) -> None:
+        self.waits: list[float] = []
+        self.started = asyncio.Event()
+        self._release = asyncio.Event()
+
+    async def sleep(self, seconds: float) -> None:
+        self.waits.append(seconds)
+        self.started.set()
+        await self._release.wait()
+        self._release.clear()
+
+    async def wait_for_sleep(self) -> None:
+        await self.started.wait()
+        self.started.clear()
+
+    def fire(self) -> None:
+        self._release.set()
+
+
+async def run_open_subscription(bot: Bot) -> tuple[CheckpointClock, "asyncio.Task[None]"]:
+    """Start the reader on an open subscription and stop at its first checkpoint wait."""
+    clock = CheckpointClock()
+    bot.reader.checkpoint_sleep = clock.sleep
+    bot.alchemy.hold_subscription_open = True
+    task = asyncio.ensure_future(bot.reader.connect_once())
+    await clock.wait_for_sleep()
+    return clock, task
+
+
+async def stop(task: "asyncio.Task[None]") -> None:
+    task.cancel()
+    await asyncio.gather(task, return_exceptions=True)
+
+
+async def test_open_subscription_moves_the_cursor_to_the_head_every_15_minutes(bot: Bot) -> None:
+    await start_at(bot, 100)
+    clock, task = await run_open_subscription(bot)
+
+    bot.alchemy.head = 500  # blocks pass with no tracked log
+    await asyncio.sleep(0.05)
+    cursor = await bot.store.get_cursor("base-sepolia")
+    assert clock.waits == [15 * 60]
+    assert cursor is not None and cursor.last_block == 100
+
+    clock.fire()
+    await clock.wait_for_sleep()
+    cursor = await bot.store.get_cursor("base-sepolia")
+    await stop(task)
+    assert cursor is not None and cursor.last_block == 500
+    assert cursor.last_block_time == datetime.fromtimestamp(block_time(500), UTC)
+    assert bot.discord.sent == {}
+
+
+async def test_checkpoint_finding_an_undelivered_transfer_posts_it_once(bot: Bot) -> None:
+    await start_at(bot, 100)
+    clock, task = await run_open_subscription(bot)
+
+    bot.alchemy.head = 120
+    bot.alchemy.logs = [mint_log(TEST_CONTRACT, 1, 110, TX_A, 0)]
+    clock.fire()
+    await clock.wait_for_sleep()
+    assert len(bot.discord.messages(TEST_CHANNEL)) == 1
+
+    # the subscription delivers the same log late
+    await bot.reader.sync_to(await bot.reader.rpc.block(110), awaited=(TX_A, 0))
+    await stop(task)
+    assert len(bot.discord.messages(TEST_CHANNEL)) == 1
+    assert bot.mint_statuses() == [PostStatus.POSTED]
+
+
+async def test_failed_checkpoint_reconnects_and_leaves_the_cursor(bot: Bot) -> None:
+    await start_at(bot, 100)
+    clock, task = await run_open_subscription(bot)
+
+    bot.alchemy.head = 500
+    bot.alchemy.failing_requests = 1
+    clock.fire()
+    with pytest.raises(ChainConnectionError):
+        await task  # run() catches this, backs off and connects again
+
+    cursor = await bot.store.get_cursor("base-sepolia")
+    assert cursor is not None and cursor.last_block == 100
+
+
+async def test_restart_20_minutes_after_the_last_checkpoint_skips_no_gap(bot: Bot) -> None:
+    await start_at(bot, 100)
+    clock, task = await run_open_subscription(bot)
+    # two checkpoints, each under 6 h after the last; together they pass 9 h from the start cursor
+    for head in (8000, 16000):
+        bot.alchemy.head = head
+        clock.fire()
+        await clock.wait_for_sleep()
+    await stop(task)
+    cursor = await bot.store.get_cursor("base-sepolia")
+    assert cursor is not None and cursor.last_block == 16000
+
+    bot.alchemy.head = 16000 + 20 * 60 // 2  # restart 20 minutes after the last checkpoint
+    bot.alchemy.hold_subscription_open = False
+    with capture_logs() as logs:
+        await bot.reader.connect_once()
+
+    assert "chain.catchup.gap_skipped" not in [entry["event"] for entry in logs]
