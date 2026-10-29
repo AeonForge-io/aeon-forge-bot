@@ -86,6 +86,7 @@ def build_views() -> dict[str, ui.LayoutView]:
             ),
             series_1,
             SERIES_1_CONTRACT,
+            "Treasury",
         ),
         "burn": create_burn_card(
             NFTBurnEvent(
