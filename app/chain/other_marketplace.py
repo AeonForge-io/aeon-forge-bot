@@ -18,6 +18,9 @@ class Payment:
     seller_received: bool
 
 
+WORD_HEX_LENGTH = 66  # "0x" and one 32-byte word
+
+
 def erc20_payment(receipt_logs: list[dict[str, Any]], seller: str, buyer: str) -> Payment | None:
     """The ERC-20 payment to the seller in a receipt, or None when no ERC-20 reaches the seller.
 
@@ -32,7 +35,9 @@ def erc20_payment(receipt_logs: list[dict[str, Any]], seller: str, buyer: str) -
             int(log["data"], 16),
         )
         for log in receipt_logs
-        if len(log["topics"]) == ERC20_TRANSFER_TOPIC_COUNT and log["topics"][0] == TRANSFER_TOPIC
+        if len(log["topics"]) == ERC20_TRANSFER_TOPIC_COUNT
+        and log["topics"][0] == TRANSFER_TOPIC
+        and len(log["data"]) == WORD_HEX_LENGTH
     ]
     paid_to_seller = [t for t in transfers if t[2] == seller]
     if not paid_to_seller:

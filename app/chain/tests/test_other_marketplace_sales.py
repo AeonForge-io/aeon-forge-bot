@@ -1,11 +1,14 @@
 """The fallback: a tracked transfer paid for outside every named marketplace posts as a sale."""
 
+from collections.abc import MutableMapping
 from datetime import UTC, datetime
 from typing import Any
 
 import pytest
+from structlog.testing import capture_logs
 
 from app.chain.abi import TRANSFER_TOPIC
+from app.chain.rpc import SYMBOL_SELECTOR, ChainConnectionError, RpcResponseError
 from app.chain.tests.conftest import (
     MAIN_CHANNEL,
     Bot,
@@ -198,3 +201,89 @@ async def test_a_switched_off_sales_post_is_recorded_as_skipped() -> None:
 
     assert bot.discord.messages(MAIN_CHANNEL) == []
     assert [s.status for s in bot.store.events[EventKind.SALE]] == [PostStatus.SKIPPED]
+
+
+BAD_COIN = "0x00000000000000000000000000000000000000f6"
+RAW_SYMBOL_BYTES = "0x" + f"{32:064x}" + f"{2:064x}" + "ff fe".replace(" ", "").ljust(64, "0")
+
+
+async def assert_recorded_and_moved_on(bot: Bot, logs: list[MutableMapping[str, Any]]) -> None:
+    cursor = await bot.store.get_cursor("base")
+    assert cursor is not None
+    assert cursor.last_block == 101
+    assert bot.discord.messages(MAIN_CHANNEL) == []
+    assert transfer_statuses(bot) == [PostStatus.SKIPPED]  # company mode, sender not company
+    assert [log for log in logs if log["log_level"] == "error"]
+
+
+async def test_a_transfer_topic_log_with_empty_data_does_not_stop_the_block(
+    base_bot: Bot,
+) -> None:
+    junk = erc20_transfer(USDC, BUYER, SELLER, 1)
+    junk["data"] = "0x"
+    base_bot.alchemy.receipts[TX_A] = [junk]
+
+    await read(base_bot)
+
+    cursor = await base_bot.store.get_cursor("base")
+    assert cursor is not None
+    assert cursor.last_block == 101
+    assert transfer_statuses(base_bot) == [PostStatus.SKIPPED]
+
+
+async def test_a_symbol_call_that_errors_is_logged_and_the_block_completes(
+    base_bot: Bot,
+) -> None:
+    base_bot.alchemy.receipts[TX_A] = [erc20_transfer(BAD_COIN, BUYER, SELLER, 5)]
+    original = base_bot.alchemy.request
+
+    async def request(method: str, params: list[Any]) -> Any:
+        if method == "eth_call" and params[0]["data"] == SYMBOL_SELECTOR:
+            raise RpcResponseError("eth_call returned an error: execution reverted")
+        return await original(method, params)
+
+    base_bot.alchemy.request = request  # type: ignore[method-assign]
+
+    with capture_logs() as logs:
+        await read(base_bot)
+
+    await assert_recorded_and_moved_on(base_bot, logs)
+
+
+async def test_a_non_utf8_symbol_is_logged_and_the_block_completes(base_bot: Bot) -> None:
+    base_bot.alchemy.receipts[TX_A] = [erc20_transfer(BAD_COIN, BUYER, SELLER, 5)]
+    original = base_bot.alchemy.request
+
+    async def request(method: str, params: list[Any]) -> Any:
+        if method == "eth_call" and params[0]["data"] == SYMBOL_SELECTOR:
+            return RAW_SYMBOL_BYTES
+        return await original(method, params)
+
+    base_bot.alchemy.request = request  # type: ignore[method-assign]
+
+    with capture_logs() as logs:
+        await read(base_bot)
+
+    await assert_recorded_and_moved_on(base_bot, logs)
+
+
+async def test_a_connection_failure_during_detection_leaves_the_block_to_retry(
+    base_bot: Bot,
+) -> None:
+    base_bot.alchemy.receipts[TX_A] = [erc20_transfer(BAD_COIN, BUYER, SELLER, 5)]
+    original = base_bot.alchemy.request
+
+    async def request(method: str, params: list[Any]) -> Any:
+        if method == "eth_call" and params[0]["data"] == SYMBOL_SELECTOR:
+            raise ChainConnectionError("down")
+        return await original(method, params)
+
+    base_bot.alchemy.request = request  # type: ignore[method-assign]
+
+    with pytest.raises(ChainConnectionError):
+        await read(base_bot)
+
+    cursor = await base_bot.store.get_cursor("base")
+    assert cursor is not None
+    assert cursor.last_block == 100
+    assert transfer_statuses(base_bot) == []

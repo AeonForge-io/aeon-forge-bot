@@ -23,6 +23,10 @@ class ChainConnectionError(AeonForgeBotError):
     """The Alchemy connection failed or dropped; the caller reconnects."""
 
 
+class RpcResponseError(ChainConnectionError):
+    """The node answered but refused or could not serve the call; retrying will not help."""
+
+
 class SubscriptionError(AeonForgeBotError):
     """Alchemy refused the eth_subscribe request."""
 
@@ -70,7 +74,7 @@ class AlchemyTransport:
             # str(e) can carry the URL, which holds the API key
             raise ChainConnectionError(f"{method} failed: {type(e).__name__}") from None
         if "error" in body:
-            raise ChainConnectionError(f"{method} returned an error: {body['error']}")
+            raise RpcResponseError(f"{method} returned an error: {body['error']}")
         return body["result"]
 
     async def subscribe_logs(self, log_filter: dict[str, Any]) -> AsyncIterator[dict[str, Any]]:
@@ -214,11 +218,15 @@ class ChainRpc:
             raw = bytes.fromhex(symbol_result.removeprefix("0x"))
             length = int.from_bytes(raw[32:64], "big")
             if len(raw) < 64 + length or length == 0:
-                raise ChainConnectionError(
+                raise RpcResponseError(
                     f"ERC-20 {token} symbol() is not an ABI string: {symbol_result!r}"
                 )
+            try:
+                symbol = raw[64 : 64 + length].decode()
+            except UnicodeDecodeError:
+                raise RpcResponseError(f"ERC-20 {token} symbol() is not valid UTF-8") from None
             self._erc20_coins[token] = Coin(
-                raw[64 : 64 + length].decode(),
+                symbol,
                 await self.call_uint(token, DECIMALS_SELECTOR, "latest"),
             )
         return self._erc20_coins[token]

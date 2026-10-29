@@ -34,11 +34,11 @@ def element_sales(receipt_logs: list[dict[str, Any]]) -> list[DecodedSale]:
     """The sales among a receipt's logs, from ElementEx's own fill events only."""
     sales = []
     for log in receipt_logs:
+        if log["address"].lower() != ELEMENT_EX or not log["topics"]:
+            continue
         topic = log["topics"][0]
         is_listing = topic in LISTING_FILLED_TOPICS
-        if log["address"].lower() != ELEMENT_EX or not (
-            is_listing or topic in OFFER_ACCEPTED_TOPICS
-        ):
+        if not (is_listing or topic in OFFER_ACCEPTED_TOPICS):
             continue
         data = abi_words(log["data"])
         maker, taker = address(data[MAKER_WORD]), address(data[TAKER_WORD])

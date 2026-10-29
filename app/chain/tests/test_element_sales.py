@@ -173,3 +173,13 @@ async def test_test_contract_sales_are_never_decoded() -> None:
 
     assert bot.alchemy.receipt_requests == []
     assert bot.store.events[EventKind.SALE] == []
+
+
+async def test_a_log_with_no_topics_does_not_hide_the_element_sale(base_bot: Bot) -> None:
+    junk = {"address": "0x" + "ab" * 20, "topics": [], "data": "0x", "logIndex": "0x1"}
+    base_bot.alchemy.receipts[TX_A] = [junk, element_log(ERC721_SELL, 5, 10**18)]
+
+    await read(base_bot, sale_transfer())
+
+    [card] = base_bot.discord.messages(MAIN_CHANNEL)
+    assert card.values("Marketplace") == ["Element"]
