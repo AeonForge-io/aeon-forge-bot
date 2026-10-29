@@ -14,6 +14,7 @@ from typing import Any, TypeVar
 
 from app.chain.element import element_sales
 from app.chain.forum_one import ForumOneSale, forum_one_sales
+from app.chain.rarible import rarible_sale
 from app.chain.rpc import Block, ChainConnectionError, ChainRpc, SubscriptionError, hex_to_int
 from app.chain.seaport import SeaportSale, name_seaport_sale, seaport_sales
 from app.core.logging import get_logger
@@ -36,6 +37,7 @@ logger = get_logger(__name__)
 _SaleT = TypeVar("_SaleT", ForumOneSale, SeaportSale)
 
 ELEMENT_MARKETPLACE = "Element"
+RARIBLE_MARKETPLACE = "Rarible"
 ERC721_TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
 TOTAL_SUPPLY_SELECTOR = "0x18160ddd"
 MAX_SUPPLY_SELECTOR = "0xd5abeb01"
@@ -281,6 +283,9 @@ class ChainReader:
         elif (element := await self._element_sale(collection, transfer, receipts)) is not None:
             sale = element
             await self._store_sale(block, collection, transfer, element, ELEMENT_MARKETPLACE)
+        elif (rarible := await self._rarible_sale(collection, transfer, receipts)) is not None:
+            sale = rarible
+            await self._store_sale(block, collection, transfer, rarible, RARIBLE_MARKETPLACE)
         else:
             seaport = await self._seaport_sale(collection, transfer, receipts)
             if seaport is not None:
@@ -356,6 +361,22 @@ class ChainReader:
         if collection.chain not in FORUM_ONE_CHAIN_IDS or not collection.track_marketplace:
             return None  # ElementEx's address is Base's; test contracts are never decoded
         return await self._matching_sale(transfer, receipts, element_sales)
+
+    async def _rarible_sale(
+        self,
+        collection: Collection,
+        transfer: TransferLog,
+        receipts: dict[str, list[dict[str, Any]]],
+    ) -> ForumOneSale | None:
+        if collection.chain not in FORUM_ONE_CHAIN_IDS or not collection.track_marketplace:
+            return None  # ExchangeMetaV2's address is Base's; test contracts are never decoded
+        return rarible_sale(
+            await self._receipt_logs(transfer, receipts),
+            transfer.contract,
+            transfer.token_id,
+            transfer.sender,
+            transfer.recipient,
+        )
 
     async def _seaport_sale(
         self,
