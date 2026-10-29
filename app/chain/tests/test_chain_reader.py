@@ -427,3 +427,110 @@ async def test_null_result_is_a_transient_failure_that_leaves_the_cursor(
     assert not isinstance(raised.value, RpcResponseError)
     assert null_method in str(raised.value)
     assert (await bot.store.get_cursor(chain)).last_block == 100
+
+
+def tracked_mint_notification(block: int, tx: str = TX_A) -> dict[str, object]:
+    return mint_log(TEST_CONTRACT, 1, block, tx, 0)
+
+
+async def test_contract_change_failing_during_adoption_backs_off_instead_of_spinning(
+    bot: Bot,
+) -> None:
+    bot.reader.replace_contracts(frozenset({TEST_CONTRACT, SECOND_CONTRACT}))
+    bot.alchemy.failing_requests = 100
+
+    with pytest.raises(StopTest):
+        await asyncio.wait_for(bot.reader.run(), timeout=2)
+
+    assert bot.sleeps == [2.0, 4.0, 8.0]
+
+
+async def test_backoff_resets_after_a_healthy_connection(bot: Bot) -> None:
+    bot.alchemy.failing_requests = 1
+    bot.alchemy.subscription_failure = ChainConnectionError("dropped")
+
+    with pytest.raises(StopTest):
+        await bot.reader.run()
+
+    assert bot.sleeps == [2.0, 2.0, 2.0]
+
+
+async def test_refused_subscription_on_a_chain_without_polling_backs_off_and_retries() -> None:
+    bot = await build_bot("base", sepolia_collection(chain="base"))
+    bot.alchemy.subscription_error = SubscriptionError("no logs subscription")
+
+    with pytest.raises(StopTest):
+        await bot.reader.run()
+
+    assert bot.sleeps == [2.0, 4.0, 8.0]
+    assert len(bot.alchemy.subscription_filters) == 3
+
+
+async def test_log_between_the_catch_up_head_and_the_subscription_is_read(bot: Bot) -> None:
+    await start_at(bot, 100)
+
+    def block_arrives_while_subscribing() -> None:
+        bot.alchemy.head = 101
+        bot.alchemy.logs = [mint_log(TEST_CONTRACT, 1, 101, TX_A, 0)]
+
+    bot.alchemy.on_subscribe = block_arrives_while_subscribing
+    bot.alchemy.hold_subscription_open = True
+
+    with pytest.raises(TimeoutError):
+        await asyncio.wait_for(bot.reader.connect_once(), timeout=0.2)
+
+    assert len(bot.discord.messages(TEST_CHANNEL)) == 1
+
+
+async def test_lagging_node_is_retried_until_it_serves_the_announced_log(bot: Bot) -> None:
+    await start_at(bot, 100)
+    bot.alchemy.logs = [mint_log(TEST_CONTRACT, 1, 101, TX_A, 0)]
+    bot.alchemy.notifications = [tracked_mint_notification(101)]
+    bot.alchemy.hidden_log_reads = 2
+    lag_sleeps: list[float] = []
+
+    async def record_lag_sleep(seconds: float) -> None:
+        lag_sleeps.append(seconds)
+
+    bot.reader.sleep = record_lag_sleep
+
+    await bot.reader.connect_once()
+
+    assert lag_sleeps == [2.0, 2.0]
+    assert len(bot.discord.messages(TEST_CHANNEL)) == 1
+
+
+async def test_lagging_node_that_never_serves_the_log_leaves_the_cursor_for_a_retry(
+    bot: Bot,
+) -> None:
+    await start_at(bot, 100)
+    bot.alchemy.logs = [mint_log(TEST_CONTRACT, 1, 101, TX_A, 0)]
+    bot.alchemy.notifications = [tracked_mint_notification(101)]
+    bot.alchemy.hidden_log_reads = 100
+
+    async def no_sleep(seconds: float) -> None:
+        return None
+
+    bot.reader.sleep = no_sleep
+
+    with pytest.raises(ChainConnectionError):
+        await bot.reader.connect_once()
+
+    cursor = await bot.store.get_cursor("base-sepolia")
+    assert cursor is not None
+    assert cursor.last_block == 100
+    assert bot.discord.messages(TEST_CHANNEL) == []
+
+
+async def test_log_at_a_block_the_cursor_already_passed_is_read_again(bot: Bot) -> None:
+    await start_at(bot, 101)
+    bot.alchemy.head = 101
+    bot.alchemy.logs = [mint_log(TEST_CONTRACT, 1, 101, TX_A, 0)]  # replaced the block's logs
+    bot.alchemy.notifications = [tracked_mint_notification(101)]
+
+    await bot.reader.connect_once()
+
+    assert len(bot.discord.messages(TEST_CHANNEL)) == 1
+    cursor = await bot.store.get_cursor("base-sepolia")
+    assert cursor is not None
+    assert cursor.last_block == 101

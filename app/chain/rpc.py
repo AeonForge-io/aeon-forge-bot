@@ -3,6 +3,7 @@
 The Transport protocol is the network boundary; tests fake it with Alchemy-shaped replies.
 """
 
+import asyncio
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from types import TracebackType
@@ -38,8 +39,13 @@ class Transport(Protocol):
         """Send one JSON-RPC call over HTTP and return its result."""
         ...
 
-    def subscribe_logs(self, log_filter: dict[str, Any]) -> AsyncIterator[dict[str, Any]]:
-        """Open an eth_subscribe logs subscription and yield each log notification."""
+    def subscribe_logs(
+        self, log_filter: dict[str, Any], opened: asyncio.Event
+    ) -> AsyncIterator[dict[str, Any]]:
+        """Open an eth_subscribe logs subscription and yield each log notification.
+
+        The opened event is set once the node has accepted the subscription.
+        """
         ...
 
 
@@ -77,7 +83,9 @@ class AlchemyTransport:
             raise RpcResponseError(f"{method} returned an error: {body['error']}")
         return body["result"]
 
-    async def subscribe_logs(self, log_filter: dict[str, Any]) -> AsyncIterator[dict[str, Any]]:
+    async def subscribe_logs(
+        self, log_filter: dict[str, Any], opened: asyncio.Event
+    ) -> AsyncIterator[dict[str, Any]]:
         try:
             async with self._session.ws_connect(self._ws_url, heartbeat=30) as ws:
                 await ws.send_json(
@@ -91,6 +99,7 @@ class AlchemyTransport:
                 reply = await ws.receive_json()
                 if "error" in reply:
                     raise SubscriptionError(f"eth_subscribe refused: {reply['error']}")
+                opened.set()
                 async for message in ws:
                     if message.type != aiohttp.WSMsgType.TEXT:
                         break

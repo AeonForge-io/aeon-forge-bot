@@ -1,6 +1,7 @@
 """The test entry point's fakes: Alchemy at the transport boundary, and Discord."""
 
-from collections.abc import AsyncIterator
+import asyncio
+from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
@@ -99,6 +100,10 @@ class FakeAlchemy:
     subscription_filters: list[dict[str, Any]] = field(default_factory=list)
     subscription_error: SubscriptionError | None = None
     failing_requests: int = 0
+    hidden_log_reads: int = 0  # eth_getLogs answers that omit every log, as a lagging node does
+    on_subscribe: Callable[[], None] | None = None
+    hold_subscription_open: bool = False
+    subscription_failure: ChainConnectionError | None = None
     calls: list[str] = field(default_factory=list)
     receipt_requests: list[str] = field(default_factory=list)
 
@@ -113,6 +118,9 @@ class FakeAlchemy:
         if method == "eth_getLogs":
             wanted = params[0]
             low, high = int(wanted["fromBlock"], 16), int(wanted["toBlock"], 16)
+            if self.hidden_log_reads:
+                self.hidden_log_reads -= 1
+                return []
             return [
                 log
                 for log in self.logs
@@ -158,12 +166,22 @@ class FakeAlchemy:
             }
         raise AssertionError(f"unexpected RPC {method}")
 
-    async def subscribe_logs(self, log_filter: dict[str, Any]) -> AsyncIterator[dict[str, Any]]:
+    async def subscribe_logs(
+        self, log_filter: dict[str, Any], opened: asyncio.Event
+    ) -> AsyncIterator[dict[str, Any]]:
         self.subscription_filters.append(log_filter)
         if self.subscription_error:
             raise self.subscription_error
+        opened.set()
+        if self.on_subscribe:
+            self.on_subscribe()
         for notification in self.notifications:
             yield notification
+        if self.subscription_failure:
+            await asyncio.sleep(0.01)  # let the catch-up after the subscription finish first
+            raise self.subscription_failure
+        if self.hold_subscription_open:
+            await asyncio.Event().wait()
 
 
 class FakeDiscord:

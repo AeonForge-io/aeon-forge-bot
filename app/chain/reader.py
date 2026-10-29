@@ -78,6 +78,10 @@ BACKOFF_MAX_SECONDS = 60.0
 POLLING_FALLBACK_CHAINS = frozenset({"base-sepolia"})
 POLL_INTERVAL_SECONDS = 30.0
 
+# A lagging HTTP node may not serve a log the websocket node already announced
+LOG_LAG_RETRIES = 3
+LOG_LAG_DELAY_SECONDS = 2.0
+
 
 class TransferLog:
     """A decoded ERC-721 Transfer."""
@@ -111,6 +115,8 @@ class ChainReader:
         reloader: SettingsReloader,
         publisher: EventPublisher,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+        lag_retries: int = LOG_LAG_RETRIES,
+        lag_delay: float = LOG_LAG_DELAY_SECONDS,
     ) -> None:
         self.chain = chain
         self.rpc = rpc
@@ -118,9 +124,13 @@ class ChainReader:
         self.reloader = reloader
         self.publisher = publisher
         self.sleep = sleep
+        self.lag_retries = lag_retries
+        self.lag_delay = lag_delay
         self.contracts = reloader.current.tracked_contracts.get(chain, frozenset())
         self._next_contracts: frozenset[str] | None = None
         self._contracts_changed = asyncio.Event()
+        self._sync_lock = asyncio.Lock()
+        self._healthy = False  # catch-up done and the connection up: resets the backoff
 
     def replace_contracts(self, contracts: frozenset[str]) -> None:
         """Track a new contract set; the subscription is replaced at the next safe point."""
@@ -134,23 +144,29 @@ class ChainReader:
         delay = BACKOFF_START_SECONDS
         polling = False
         while True:
+            self._healthy = False
             try:
                 if polling:
                     await self._poll_forever()
                 else:
                     await self.connect_once()
-                delay = BACKOFF_START_SECONDS
             except SubscriptionError as e:
-                if self.chain not in POLLING_FALLBACK_CHAINS:
-                    raise
-                logger.warning("chain.subscription.refused", chain=self.chain, error=str(e))
-                polling = True
-                continue
+                if self.chain in POLLING_FALLBACK_CHAINS:
+                    logger.warning("chain.subscription.refused", chain=self.chain, error=str(e))
+                    polling = True
+                    continue
+                logger.warning("chain.subscription.failed", chain=self.chain, error=str(e))
             except ChainConnectionError as e:
                 logger.warning("chain.connection.lost", chain=self.chain, error=str(e))
-                delay = min(delay * 2, BACKOFF_MAX_SECONDS)
-            if not self._contracts_changed.is_set():
-                await self.sleep(delay)
+            else:
+                delay = BACKOFF_START_SECONDS
+                if not self._contracts_changed.is_set():
+                    await self.sleep(delay)
+                continue
+            if self._healthy:
+                delay = BACKOFF_START_SECONDS
+            delay = min(delay * 2, BACKOFF_MAX_SECONDS)
+            await self.sleep(delay)
 
     async def connect_once(self) -> None:
         """Catch up, then follow the subscription until it ends or the contract set changes."""
@@ -160,29 +176,44 @@ class ChainReader:
             # An empty address filter matches every contract, so wait for a tracked one instead
             await self._contracts_changed.wait()
             return
-        live = asyncio.ensure_future(self._follow_subscription())
+        opened = asyncio.Event()
+        live = asyncio.ensure_future(self._follow_subscription(opened))
         changed = asyncio.ensure_future(self._contracts_changed.wait())
+        gap = asyncio.ensure_future(self._catch_up_when_open(opened))
         try:
-            await asyncio.wait({live, changed}, return_when=asyncio.FIRST_COMPLETED)
+            while not (live.done() or changed.done()):
+                waiting = {live, changed} | ({gap} if not gap.done() else set())
+                await asyncio.wait(waiting, return_when=asyncio.FIRST_COMPLETED)
+                if gap.done():
+                    gap.result()
         finally:
             live.cancel()
             changed.cancel()
-            await asyncio.gather(live, changed, return_exceptions=True)
+            gap.cancel()
+            await asyncio.gather(live, changed, gap, return_exceptions=True)
         if live.done() and not live.cancelled():
             live.result()
 
-    async def _follow_subscription(self) -> None:
+    async def _catch_up_when_open(self, opened: asyncio.Event) -> None:
+        """Read the blocks between the first catch-up's head and the subscription's start."""
+        await opened.wait()
+        await self.sync_to(await self.rpc.block())
+        self._healthy = True
+
+    async def _follow_subscription(self, opened: asyncio.Event) -> None:
         log_filter = {"address": sorted(self.contracts), "topics": [TRANSFER_TOPIC]}
-        async for log in self.rpc.transport.subscribe_logs(log_filter):
+        async for log in self.rpc.transport.subscribe_logs(log_filter, opened):
             if log.get("removed"):
                 logger.info("chain.log.removed", chain=self.chain, tx=log["transactionHash"])
                 continue
-            await self.sync_to(await self.rpc.block(hex_to_int(log["blockNumber"])))
+            block = await self.rpc.block(hex_to_int(log["blockNumber"]))
+            await self.sync_to(block, awaited=(log["transactionHash"], hex_to_int(log["logIndex"])))
 
     async def _poll_forever(self) -> None:
         while True:
             await self._adopt_new_contracts()
             await self.sync_to(await self.rpc.block())
+            self._healthy = True
             await self.sleep(POLL_INTERVAL_SECONDS)
 
     async def _adopt_new_contracts(self) -> None:
@@ -199,14 +230,24 @@ class ChainReader:
 
     # ---- Catch-up and cursor ----
 
-    async def sync_to(self, head: Block) -> None:
-        """Store and post the events between the cursor and the head, then move the cursor."""
+    async def sync_to(self, head: Block, awaited: tuple[str, int] | None = None) -> None:
+        """Store and post the events between the cursor and the head, then move the cursor.
+
+        The awaited (transaction hash, log index) is a log the subscription announced in the head
+        block: the read must contain it, or the cursor stays where it is and the block is retried.
+        """
+        async with self._sync_lock:
+            await self._sync_to(head, awaited)
+
+    async def _sync_to(self, head: Block, awaited: tuple[str, int] | None) -> None:
         cursor = await self.store.get_cursor(self.chain)
         if cursor is None:
             await self._save_cursor(head)
             logger.info("chain.cursor.started", chain=self.chain, block=head.number)
             return
         if head.number <= cursor.last_block:
+            if awaited is not None and self.contracts:
+                await self._replay_block(head, awaited)  # a replacement at a stored height
             return
         start = cursor.last_block + 1
         cutoff = head.timestamp - CATCH_UP_WINDOW_SECONDS
@@ -223,7 +264,7 @@ class ChainReader:
             return
         for low in range(start, head.number + 1, LOG_RANGE_BLOCKS):
             high = min(low + LOG_RANGE_BLOCKS - 1, head.number)
-            logs = await self.rpc.logs(low, high, sorted(self.contracts), [TRANSFER_TOPIC])
+            logs = await self._read_logs(low, high, awaited if high == head.number else None)
             by_block: dict[int, list[dict[str, Any]]] = defaultdict(list)
             for log in logs:
                 if log.get("removed"):
@@ -234,6 +275,30 @@ class ChainReader:
                 await self._store_block_events(block, by_block[number])
                 await self._save_cursor(block)
         await self._save_cursor(head)
+
+    async def _replay_block(self, block: Block, awaited: tuple[str, int]) -> None:
+        """Re-read a block the cursor already passed; stored events dedup, the cursor stays."""
+        logs = await self._read_logs(block.number, block.number, awaited)
+        await self._store_block_events(block, [log for log in logs if not log.get("removed")])
+
+    async def _read_logs(
+        self, low: int, high: int, awaited: tuple[str, int] | None
+    ) -> list[dict[str, Any]]:
+        """eth_getLogs, retried while a lagging node lacks the awaited log."""
+        attempt = 0
+        while True:
+            logs = await self.rpc.logs(low, high, sorted(self.contracts), [TRANSFER_TOPIC])
+            if awaited is None:
+                return logs
+            if any(
+                (log["transactionHash"], hex_to_int(log["logIndex"])) == awaited for log in logs
+            ):
+                return logs
+            if attempt >= self.lag_retries:
+                break
+            attempt += 1
+            await self.sleep(self.lag_delay)
+        raise ChainConnectionError(f"node does not serve announced log {awaited[0]} yet")
 
     async def _first_block_since(self, cutoff: int, low: int, high: int) -> int:
         """The first block in [low, high] whose time is at or after the cutoff."""
