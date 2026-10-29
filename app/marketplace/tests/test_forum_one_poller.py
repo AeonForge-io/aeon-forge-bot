@@ -10,7 +10,7 @@ import pytest
 from app.chain.tests.conftest import MAIN_CHANNEL
 from app.core.store import EventKind, PostStatus
 from app.marketplace.forum_one import ForumOneApi, ForumOneError
-from app.marketplace.tests.conftest import LE_CONTRACT, SELLER, Poller, le_collection, listing
+from app.marketplace.tests.conftest import LE_CONTRACT, NOW, SELLER, Poller, le_collection, listing
 from app.nft.models import NFTListingEvent
 
 HASH_A = "0x" + "a1" * 32
@@ -145,6 +145,54 @@ async def test_a_malformed_page_is_contained_and_sets_no_baseline(poller: Poller
     await poller.poller.poll_once()
     assert poller.statuses() == []
     assert poller.discord.sent == {}
+
+
+async def test_one_bad_listing_is_skipped_and_the_rest_still_post(poller: Poller) -> None:
+    await poller.poller.poll_once()
+    poller.forum_one.listings = [
+        listing(1, HASH_A, currencySymbol=None),
+        {k: v for k, v in listing(2, HASH_B).items() if k != "createdAt"},
+        listing(3, HASH_C, tokenId=3),
+    ]
+    await poller.poller.poll_once()
+    [card] = poller.discord.messages(MAIN_CHANNEL)
+    assert "DragonZ Limited Edition #3" in card.text
+    assert len(poller.statuses()) == 1
+
+
+async def test_a_server_that_ignores_offset_stops_at_the_page_cap(poller: Poller) -> None:
+    class _Stuck:
+        calls = 0
+
+        async def listings_page(self, _c: str, _a: str, _o: int) -> dict[str, object]:
+            self.calls += 1
+            return {"listings": [listing(1, HASH_A)], "hasMore": True}
+
+    stuck = _Stuck()
+    poller.poller.api = stuck
+    await poller.poller.poll_once()
+    assert stuck.calls == 100
+    assert poller.statuses() == []
+
+
+async def test_a_listing_older_than_six_hours_is_recorded_skipped_not_posted(
+    poller: Poller,
+) -> None:
+    await poller.poller.poll_once()
+    old = (NOW - timedelta(hours=6, seconds=1)).isoformat()
+    poller.forum_one.listings = [listing(1, HASH_A, createdAt=old)]
+    await poller.poller.poll_once()
+    assert poller.statuses() == [PostStatus.SKIPPED]
+    assert poller.discord.sent == {}
+
+
+async def test_the_small_feed_image_is_rewritten_to_512(poller: Poller) -> None:
+    await poller.poller.poll_once()
+    url = f"https://cdn.test/storage/8453/{LE_CONTRACT}/64/9.webp"
+    poller.forum_one.listings = [listing(9, HASH_A, imageUrl=url)]
+    await poller.poller.poll_once()
+    [card] = poller.discord.messages(MAIN_CHANNEL)
+    assert card.images == [f"https://cdn.test/storage/8453/{LE_CONTRACT}/512/9.webp"]
 
 
 async def test_a_pending_listing_expires_after_six_hours(poller: Poller) -> None:

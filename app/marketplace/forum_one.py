@@ -6,17 +6,18 @@ ignored.
 """
 
 import asyncio
+import re
 from datetime import datetime
 from decimal import Decimal
 from typing import Any, Protocol
 
 import aiohttp
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
 
 from app.core.logging import get_logger
 from app.core.settings_reload import SettingsReloader
 from app.core.store import Collection, PostStatus, Store
-from app.discord.event_publisher import EventPublisher
+from app.discord.event_publisher import EXPIRY_AFTER, EventPublisher
 from app.nft.metadata import token_image_url
 from app.nft.models import NFTListingEvent
 from app.shared.exceptions import AeonForgeBotError
@@ -26,6 +27,9 @@ logger = get_logger(__name__)
 MARKETPLACE = "forum_one"
 POLL_INTERVAL_SECONDS = 60
 PAGE_SIZE = 50
+MAX_PAGES = 100
+# the feed serves 64 px images; the same path at 512 px exists and fits a Discord embed
+SMALL_IMAGE = re.compile(r"/64/([^/]+)$")
 FORUM_ONE_API = "https://forumone.io/api"
 # Forum One serves Base only among the chains this bot tracks
 FORUM_ONE_CHAIN_IDS: dict[str, int] = {"base": 8453}
@@ -77,13 +81,21 @@ class ForumOneListing(BaseModel):
     tokenName: str | None = None
     imageUrl: str | None = None
 
+    @field_validator("tokenId", mode="before")
+    @classmethod
+    def _token_id_to_str(cls, value: object) -> object:
+        # pydantic v2 does not coerce an int to str; the feed sometimes sends a number
+        if isinstance(value, int) and not isinstance(value, bool):
+            return str(value)
+        return value
+
 
 class ListingsPage(BaseModel):
-    """One page of the listings response."""
+    """One page of the listings response; each listing is validated on its own."""
 
     model_config = ConfigDict(extra="ignore")
 
-    listings: list[ForumOneListing]
+    listings: list[Any]
     hasMore: bool
 
 
@@ -129,10 +141,14 @@ class ForumOnePoller:
         status = (
             PostStatus.PENDING if has_baseline and collection.post_listings else PostStatus.SKIPPED
         )
+        stale_before = self.publisher.clock() - EXPIRY_AFTER
         for listing in live:
             event = self._event(collection, listing)
-            event_id = await self.store.insert_listing(event, status)
-            if event_id is not None and status is PostStatus.PENDING:
+            listing_status = status
+            if status is PostStatus.PENDING and listing.createdAt < stale_before:
+                listing_status = PostStatus.SKIPPED  # no backlog older than 6 hours
+            event_id = await self.store.insert_listing(event, listing_status)
+            if event_id is not None and listing_status is PostStatus.PENDING:
                 await self.publisher.post_listing(collection, event_id, event)
         if not has_baseline:
             await self.store.mark_marketplace_polled(collection.id, MARKETPLACE)
@@ -140,7 +156,7 @@ class ForumOnePoller:
     async def _fetch_all(self, collection: Collection) -> list[ForumOneListing]:
         listings: list[ForumOneListing] = []
         offset = 0
-        while True:
+        for _ in range(MAX_PAGES):
             raw = await self.api.listings_page(
                 collection.chain, collection.contract_address, offset
             )
@@ -148,12 +164,21 @@ class ForumOnePoller:
                 page = ListingsPage.model_validate(raw)
             except ValueError as e:
                 raise ForumOneError(f"Unexpected listings page at offset {offset}: {e}") from e
-            listings.extend(page.listings)
-            if not page.hasMore:
-                return listings
-            if not page.listings:
+            for entry in page.listings:
+                try:
+                    listings.append(ForumOneListing.model_validate(entry))
+                except ValidationError as e:
+                    order_hash = entry.get("orderHash") if isinstance(entry, dict) else None
+                    logger.error(
+                        "forum_one.listing.invalid",
+                        collection=collection.collection_id,
+                        order_hash=order_hash,
+                        error=str(e),
+                    )
+            if not page.hasMore or not page.listings:
                 return listings
             offset += len(page.listings)
+        raise ForumOneError(f"Listings still have more pages after {MAX_PAGES} pages")
 
     @staticmethod
     def _event(collection: Collection, listing: ForumOneListing) -> NFTListingEvent:
@@ -161,7 +186,11 @@ class ForumOnePoller:
             collection_id=collection.id,
             token_id=listing.tokenId,
             token_name=listing.tokenName,
-            token_image_url=listing.imageUrl or token_image_url(collection, listing.tokenId),
+            token_image_url=(
+                SMALL_IMAGE.sub(r"/512/\1", listing.imageUrl)
+                if listing.imageUrl
+                else token_image_url(collection, listing.tokenId)
+            ),
             seller_address=listing.sellerAddress,
             marketplace=MARKETPLACE,
             price_native=listing.unitPrice,
