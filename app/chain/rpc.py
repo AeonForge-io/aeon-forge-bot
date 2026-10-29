@@ -1,4 +1,4 @@
-"""Alchemy JSON-RPC: the transport (HTTP + websocket) and typed reads on top of it.
+"""JSON-RPC: the transports (HTTP, and Alchemy with websocket) and typed reads on top of them.
 
 The Transport protocol is the network boundary; tests fake it with Alchemy-shaped replies.
 """
@@ -7,7 +7,7 @@ import asyncio
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from types import TracebackType
-from typing import Any, Protocol, TypeVar
+from typing import Any, Protocol, Self, TypeVar
 
 import aiohttp
 
@@ -17,11 +17,12 @@ from app.shared.exceptions import AeonForgeBotError
 SYMBOL_SELECTOR = "0x95d89b41"
 DECIMALS_SELECTOR = "0x313ce567"
 TX_CACHE_SIZE = 256
+HTTP_OK = 200
 _T = TypeVar("_T")
 
 
 class ChainConnectionError(AeonForgeBotError):
-    """The Alchemy connection failed or dropped; the caller reconnects."""
+    """The node connection failed or dropped; the caller reconnects."""
 
 
 class RpcResponseError(ChainConnectionError):
@@ -49,18 +50,15 @@ class Transport(Protocol):
         ...
 
 
-class AlchemyTransport:
-    """Transport for one chain on Alchemy, over https and wss."""
+class HttpTransport:
+    """JSON-RPC calls over HTTP to any node URL, such as a free public RPC."""
 
-    def __init__(self, chain: str) -> None:
-        http_url = alchemy_rpc_url(chain)
-        if http_url is None:
-            raise ValueError(f"No Alchemy network for chain {chain}")
+    def __init__(self, http_url: str, *, strict_status: bool = True) -> None:
         self._http_url = http_url
-        self._ws_url = "wss://" + http_url.removeprefix("https://")
+        self._strict_status = strict_status
         self._session = aiohttp.ClientSession()
 
-    async def __aenter__(self) -> "AlchemyTransport":
+    async def __aenter__(self) -> Self:
         return self
 
     async def __aexit__(
@@ -75,13 +73,26 @@ class AlchemyTransport:
         payload = {"jsonrpc": "2.0", "id": 1, "method": method, "params": params}
         try:
             async with self._session.post(self._http_url, json=payload) as response:
+                if self._strict_status and response.status != HTTP_OK:
+                    raise ChainConnectionError(f"{method} failed: HTTP {response.status}")
                 body = await response.json()
         except (aiohttp.ClientError, TimeoutError) as e:
-            # str(e) can carry the URL, which holds the API key
+            # str(e) can carry the URL, which can hold an API key
             raise ChainConnectionError(f"{method} failed: {type(e).__name__}") from None
         if "error" in body:
             raise RpcResponseError(f"{method} returned an error: {body['error']}")
         return body["result"]
+
+
+class AlchemyTransport(HttpTransport):
+    """Transport for one chain on Alchemy, over https and wss."""
+
+    def __init__(self, chain: str) -> None:
+        http_url = alchemy_rpc_url(chain)
+        if http_url is None:
+            raise ValueError(f"No Alchemy network for chain {chain}")
+        super().__init__(http_url, strict_status=False)
+        self._ws_url = "wss://" + http_url.removeprefix("https://")
 
     async def subscribe_logs(
         self, log_filter: dict[str, Any], opened: asyncio.Event

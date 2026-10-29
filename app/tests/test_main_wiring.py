@@ -50,6 +50,7 @@ def wired(monkeypatch: pytest.MonkeyPatch) -> None:
     FakeReader.fail = False
     monkeypatch.setattr(main, "ChainReader", FakeReader)
     monkeypatch.setattr(main, "AlchemyTransport", FakeTransport)
+    monkeypatch.setattr(main, "HttpTransport", FakeTransport)
     monkeypatch.setattr(main, "ChainRpc", lambda transport: transport)
     monkeypatch.setattr(main, "settings_reloader", SimpleNamespace())
     monkeypatch.setattr(main, "database_client", SimpleNamespace())
