@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 
-from app.chain.seaport import SEAPORT_1_5, SEAPORT_1_6
+from app.chain.seaport import ORDER_FULFILLED_TOPIC, SEAPORT_1_5, SEAPORT_1_6
 from app.chain.tests.conftest import (
     MAIN_CHANNEL,
     Bot,
@@ -26,9 +26,8 @@ from app.chain.tests.test_forum_one_sales import (
     sale_transfer,
     word,
 )
-from app.core.store import EventKind
+from app.core.store import EventKind, PostStatus
 
-ORDER_FULFILLED_TOPIC = "0x9d9af8e38d66c62e2c12f0225249fd9d721c54b83f48d9352c97c6cacdcb6f31"
 OPENSEA_FEE_WALLET = "0x0000a26b00c1f0df003000390027140000faa719"
 OPENSEA_ZONE = "0x000056f7000000ece9003ca63978907a00ffd100"
 OKX_ZONE = "0xdf2d4bffec010debd302674c9fb9cda99bb5e852"
@@ -153,7 +152,7 @@ async def test_a_fill_through_an_account_abstraction_entry_point_is_named_by_its
     assert await marketplace_of_the_one_sale(base_bot) == "OKX"
 
 
-async def test_an_aggregator_double_tag_names_the_earlier_tag(base_bot: Bot) -> None:
+async def test_an_aggregator_double_tag_names_the_last_tag(base_bot: Bot) -> None:
     base_bot.store.add_marketplace_mark("calldata_tag", "0x" + BLUR_TAG, "Blur")
     base_bot.store.add_marketplace_mark("calldata_tag", "0x" + GEM_TAG, "Gem")
     await base_bot.reloader.reload()
@@ -293,6 +292,37 @@ async def test_a_sale_seen_twice_posts_once(base_bot: Bot) -> None:
     await base_bot.reader.connect_once()
 
     assert len(base_bot.discord.messages(MAIN_CHANNEL)) == 1
+
+
+async def test_a_seaport_sale_transfer_posts_only_as_the_sale(base_bot: Bot) -> None:
+    base_bot.alchemy.receipts[TX_A] = [listing_fill()]
+    [collection] = base_bot.store.collections
+    base_bot.store.update_collection(replace(collection, transfer_mode="all"))
+    await base_bot.reloader.reload()
+
+    await read(base_bot, sale_transfer())
+
+    assert len(base_bot.discord.messages(MAIN_CHANNEL)) == 1
+    assert [s.status for s in base_bot.store.events[EventKind.TRANSFER]] == [PostStatus.SKIPPED]
+
+
+async def test_an_order_paying_in_two_coins_is_skipped_not_fatal(base_bot: Bot) -> None:
+    base_bot.alchemy.receipts[TX_A] = [
+        order_fulfilled(
+            offer=[nft_item(5)],
+            consideration=[
+                coin_item(10**17, recipient=SELLER),
+                coin_item(10, USDC, recipient=SELLER),
+            ],
+            offerer=SELLER,
+            recipient=BUYER,
+        )
+    ]
+
+    await read(base_bot, sale_transfer())
+
+    assert base_bot.discord.messages(MAIN_CHANNEL) == []
+    assert len(base_bot.store.events[EventKind.TRANSFER]) == 1
 
 
 async def test_a_sale_is_not_decoded_when_marketplace_tracking_is_off() -> None:

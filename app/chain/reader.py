@@ -269,12 +269,15 @@ class ChainReader:
 
         A transfer that is part of a sale is kept as skipped: the sale is what gets posted.
         """
-        sale = await self._forum_one_sale(collection, transfer, receipts)
+        sale: ForumOneSale | SeaportSale | None = await self._forum_one_sale(
+            collection, transfer, receipts
+        )
         if sale is not None:
             await self._store_sale(block, collection, transfer, sale, FORUM_ONE_MARKETPLACE)
         else:
             seaport = await self._seaport_sale(collection, transfer, receipts)
             if seaport is not None:
+                sale = seaport
                 marketplace = name_seaport_sale(
                     seaport,
                     await self.rpc.transaction_input(transfer.tx_hash),

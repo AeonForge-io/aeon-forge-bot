@@ -3,9 +3,14 @@
 from dataclasses import dataclass
 from typing import Any
 
+from app.chain.abi import address
+from app.chain.abi import words as abi_words
+from app.core.logging import get_logger
 from app.core.store import MarketplaceMark, MarkKind
 from app.nft.models import ZERO_ADDRESS
 from app.shared.exceptions import AeonForgeBotError
+
+logger = get_logger(__name__)
 
 SEAPORT_1_6 = "0x0000000000000068f116a894984e2db1123eb395"
 SEAPORT_1_5 = "0x00000000000000adc04c56bf30ac9d3c0aaf14dc"
@@ -49,30 +54,19 @@ class SeaportSale:
     fee_recipients: tuple[str, ...]
 
 
-def _words(data: str) -> list[int]:
-    hex_data = data.removeprefix("0x")
-    return [int(hex_data[i : i + 64], 16) for i in range(0, len(hex_data), 64)]
-
-
-def _address(word: int) -> str:
-    return "0x" + f"{word:064x}"[-40:]
-
-
-def _items(
-    words: list[int], offset_word: int, size: int, with_recipient: bool
-) -> list[SeaportItem]:
-    start = words[offset_word] // 32
-    count = words[start]
+def _items(data: list[int], offset_word: int, size: int, with_recipient: bool) -> list[SeaportItem]:
+    start = data[offset_word] // 32
+    count = data[start]
     items = []
     for i in range(count):
-        item = words[start + 1 + i * size : start + 1 + (i + 1) * size]
+        item = data[start + 1 + i * size : start + 1 + (i + 1) * size]
         items.append(
             SeaportItem(
                 item_type=item[0],
-                token=_address(item[1]),
+                token=address(item[1]),
                 identifier=item[2],
                 amount=item[3],
-                recipient=_address(item[4]) if with_recipient else None,
+                recipient=address(item[4]) if with_recipient else None,
             )
         )
     return items
@@ -102,11 +96,11 @@ def seaport_sales(receipt_logs: list[dict[str, Any]]) -> list[SeaportSale]:
             topics[0] != ORDER_FULFILLED_TOPIC
         ):
             continue
-        words = _words(log["data"])
-        offerer, zone = _address(int(topics[1], 16)), _address(int(topics[2], 16))
-        recipient = _address(words[1])
-        offer = _items(words, 2, 4, with_recipient=False)
-        consideration = _items(words, 3, 5, with_recipient=True)
+        data = abi_words(log["data"])
+        offerer, zone = address(int(topics[1], 16)), address(int(topics[2], 16))
+        recipient = address(data[1])
+        offer = _items(data, 2, 4, with_recipient=False)
+        consideration = _items(data, 3, 5, with_recipient=True)
         if any(item.item_type in NFT_ITEM_TYPES for item in offer):
             nfts = [item for item in offer if item.item_type in NFT_ITEM_TYPES]
             payments = [item for item in consideration if item.item_type not in NFT_ITEM_TYPES]
@@ -115,7 +109,11 @@ def seaport_sales(receipt_logs: list[dict[str, Any]]) -> list[SeaportSale]:
             nfts = [item for item in consideration if item.item_type in NFT_ITEM_TYPES]
             payments = offer
             seller, buyer = recipient, offerer
-        total_price, currency = _payment(payments)
+        try:
+            total_price, currency = _payment(payments)
+        except SeaportError as error:
+            logger.warning("skipping an unpriceable Seaport order: %s", error)
+            continue
         fee_recipients = tuple(
             item.recipient
             for item in consideration
