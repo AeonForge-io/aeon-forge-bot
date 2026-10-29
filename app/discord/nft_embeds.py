@@ -214,9 +214,7 @@ def create_transfer_card(
         _lines(
             (
                 "From",
-                f"Aeon Forge ({from_label})"
-                if from_label
-                else _wallet(names, event.from_address, event.short_from_address),
+                from_label or _wallet(names, event.from_address, event.short_from_address),
             ),
             ("To", _wallet(names, event.to_address, event.short_to_address)),
         ),

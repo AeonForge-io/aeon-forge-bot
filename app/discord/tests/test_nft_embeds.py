@@ -135,7 +135,7 @@ async def test_transfer_card_from_aeon_forge_has_browse_and_no_mint_button() -> 
     assert card.accent == TRANSFER_COLOR
     assert card.images == [IMAGE]
     assert "DragonZ #42" in card.text
-    assert card.values("From") == ["Aeon Forge (Treasury)"]
+    assert card.values("From") == ["Treasury"]
     assert card.buttons == [("Transaction", TX_URL), ("Browse Forum One", BROWSE_URL)]
 
 
@@ -270,7 +270,7 @@ async def test_company_sender_keeps_its_label_over_a_wallet_name() -> None:
 
     card = Card(create_transfer_card(event, "DragonZ", CONTRACT, "Treasury", {ADDRESS: "evil.eth"}))
 
-    assert card.values("From") == ["Aeon Forge (Treasury)"]
+    assert card.values("From") == ["Treasury"]
 
 
 async def test_test_chain_posts_have_no_forum_one_button() -> None:

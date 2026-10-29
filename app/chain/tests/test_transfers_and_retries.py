@@ -73,7 +73,7 @@ async def test_company_mode_posts_only_company_senders_with_their_label(bot: Bot
     )
 
     [card] = bot.discord.messages(TEST_CHANNEL)
-    assert card.values("From") == ["Aeon Forge (Treasury)"]
+    assert card.values("From") == ["Treasury"]
     assert "#1" in card.text
 
 
@@ -105,7 +105,7 @@ async def test_all_mode_posts_every_transfer_and_marks_company_senders(bot: Bot)
     )
 
     company, plain = bot.discord.messages(TEST_CHANNEL)
-    assert company.values("From") == ["Aeon Forge (Treasury)"]
+    assert company.values("From") == ["Treasury"]
     assert plain.values("From") == ["0x0000...00d2"]
 
 
@@ -126,7 +126,7 @@ async def test_transfer_shows_wallet_names_and_leaves_a_company_sender_unresolve
     )
 
     company, plain = bot.discord.messages(TEST_CHANNEL)
-    assert company.values("From") == ["Aeon Forge (Treasury)"]
+    assert company.values("From") == ["Treasury"]
     assert company.values("To") == ["holder.eth"]
     assert plain.values("From") == ["holder.eth"]
     assert plain.values("To") == ["0x0000...00e3"]
@@ -144,7 +144,7 @@ async def test_wallet_added_in_the_store_is_picked_up_on_the_next_reload(bot: Bo
     await bot.reader.connect_once()
 
     [card] = bot.discord.messages(TEST_CHANNEL)
-    assert card.values("From") == ["Aeon Forge (Treasury)"]
+    assert card.values("From") == ["Treasury"]
 
 
 async def test_burn_posts(bot: Bot) -> None:
@@ -226,7 +226,7 @@ async def test_pending_mints_and_transfers_are_posted_on_retry(bot: Bot) -> None
 
     mint_card, transfer_card = bot.discord.messages(TEST_CHANNEL)
     assert "#1" in mint_card.text and "#2" in mint_card.text
-    assert transfer_card.values("From") == ["Aeon Forge (Treasury)"]
+    assert transfer_card.values("From") == ["Treasury"]
     assert statuses(bot, EventKind.MINT) == [PostStatus.POSTED] * 2
     assert statuses(bot, EventKind.TRANSFER) == [PostStatus.POSTED]
 
