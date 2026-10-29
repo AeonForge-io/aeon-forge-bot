@@ -15,7 +15,6 @@ from app.discord.nft_event_colors import (
     LISTING_COLOR,
     MINT_COLOR,
     SALE_COLOR,
-    SOLD_COLOR,
     TRANSFER_COLOR,
 )
 from app.discord.tests.card_view import Card
@@ -296,24 +295,3 @@ async def test_listing_card_with_nothing_safe_in_the_symbol_says_tokens() -> Non
     card = Card(create_listing_card(event, "DragonZ", "base", CONTRACT))
 
     assert card.values("Price") == ["1 tokens"]
-
-
-async def test_sold_listing_card_is_grey_struck_through_and_has_no_buttons() -> None:
-    event = NFTListingEvent(
-        collection_id=1,
-        token_id="42",
-        token_name="DragonZ #42",
-        token_image_url=IMAGE,
-        seller_address=ADDRESS,
-        marketplace="forum_one",
-        price_native=Decimal("0.045"),
-        listing_id="0xorder",
-        event_timestamp=NOW,
-    )
-    card = Card(create_listing_card(event, "DragonZ", "base", CONTRACT, sold=True))
-
-    assert card.accent == SOLD_COLOR
-    assert card.images == [IMAGE]
-    assert "sold on Base" in card.text
-    assert card.values("Price") == ["~~0.045 ETH~~"]
-    assert card.buttons == []

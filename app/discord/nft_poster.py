@@ -254,35 +254,6 @@ class NFTPoster:
             )
             raise DiscordAPIError(f"Failed to delete message: {e}") from e
 
-    async def mark_listing_sold(
-        self,
-        event: NFTListingEvent,
-        collection_name: str,
-        channel_id: int,
-        message_id: int,
-        chain: str,
-        contract_address: str,
-    ) -> None:
-        """Edit a posted listing to the sold card; a message already gone counts as done."""
-        try:
-            channel = await self._get_channel(channel_id)
-            await channel.get_partial_message(message_id).edit(
-                view=create_listing_card(event, collection_name, chain, contract_address, sold=True)
-            )
-        except discord.NotFound:
-            logger.info("nft.sold_edit.already_gone", channel_id=channel_id, message_id=message_id)
-        except DiscordAPIError:
-            raise
-        except Exception as e:
-            logger.error(
-                "nft.sold_edit.failed",
-                channel_id=channel_id,
-                message_id=message_id,
-                error=str(e),
-                exc_info=True,
-            )
-            raise DiscordAPIError(f"Failed to edit listing message: {e}") from e
-
     async def post_sale(
         self,
         event: NFTSaleEvent,

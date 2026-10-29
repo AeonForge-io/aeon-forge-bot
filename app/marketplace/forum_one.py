@@ -2,8 +2,8 @@
 
 The first successful poll of a collection stores every live listing as skipped and sets
 the baseline; later polls insert new orderHashes and post them. A posted listing that vanishes from
-the feed is cancelled or expired, so its message is deleted; if a sale of that token by the
-same seller was recorded since it was listed, the message is edited to sold instead.
+the feed was cancelled, expired or sold, so its message is deleted (a recorded sale deletes it
+at once, before the next poll).
 """
 
 import asyncio
@@ -160,11 +160,7 @@ class ForumOnePoller:
         for stored in await self.store.list_active_listings(collection.id, MARKETPLACE):
             if stored.event.listing_id in live_hashes:
                 continue
-            event = stored.event
-            sold = await self.store.has_sale_since(
-                collection.id, event.token_id, event.seller_address, event.event_timestamp
-            )
-            await self.publisher.close_listing(collection, stored, sold=sold)
+            await self.publisher.close_listing(collection, stored)
 
     async def _fetch_all(self, collection: Collection) -> list[ForumOneListing]:
         listings: list[ForumOneListing] = []

@@ -200,18 +200,6 @@ class MemoryStore:
                 stored.active = False
                 return
 
-    async def has_sale_since(
-        self, collection_id: int, token_id: str, seller_address: str, since: datetime
-    ) -> bool:
-        return any(
-            isinstance(s.event, NFTSaleEvent)
-            and s.event.collection_id == collection_id
-            and s.event.token_id == token_id
-            and s.event.seller_address == seller_address
-            and s.event.event_timestamp >= since
-            for s in self.events[EventKind.SALE]
-        )
-
     async def set_post_status(self, kind: EventKind, event_id: int, status: PostStatus) -> None:
         for stored in self.events[kind]:
             if stored.id == event_id:

@@ -156,10 +156,6 @@ class Store(Protocol):
 
     async def set_listing_inactive(self, event_id: int) -> None: ...
 
-    async def has_sale_since(
-        self, collection_id: int, token_id: str, seller_address: str, since: datetime
-    ) -> bool: ...
-
     async def set_post_status(self, kind: EventKind, event_id: int, status: PostStatus) -> None: ...
 
     # Marketplace polling baseline, per collection and marketplace

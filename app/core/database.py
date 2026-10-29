@@ -414,26 +414,6 @@ class DatabaseClient:
             ),
         )
 
-    async def has_sale_since(
-        self, collection_id: int, token_id: str, seller_address: str, since: datetime
-    ) -> bool:
-        row = await self._run(
-            "has_sale_since",
-            lambda conn: conn.fetchrow(
-                """
-                SELECT 1 FROM nft_sales
-                WHERE collection_id = $1 AND token_id = $2 AND seller_address = $3
-                    AND event_timestamp >= $4
-                LIMIT 1
-                """,
-                collection_id,
-                token_id,
-                seller_address,
-                since,
-            ),
-        )
-        return row is not None
-
     async def set_post_status(self, kind: EventKind, event_id: int, status: PostStatus) -> None:
         # kind is an EventKind member, never user input, so naming the table is safe
         query = f"""

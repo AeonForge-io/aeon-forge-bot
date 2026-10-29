@@ -10,7 +10,6 @@ from app.discord.nft_event_colors import (
     LISTING_COLOR,
     MINT_COLOR,
     SALE_COLOR,
-    SOLD_COLOR,
     TRANSFER_COLOR,
 )
 from app.nft.coin_symbol import sanitize_symbol
@@ -228,28 +227,20 @@ def create_listing_card(
     collection_name: str,
     chain: str,
     contract_address: str,
-    sold: bool = False,
 ) -> ui.LayoutView:
-    """Create the card for a marketplace listing (no transaction: listings are off-chain).
-
-    A sold listing keeps its section but turns grey, says "sold on", strikes the price
-    through and drops the buttons.
-    """
+    """Create the card for a marketplace listing (no transaction: listings are off-chain)."""
     title_name = event.token_name or f"{collection_name} #{event.token_id}"
     listing_symbol = sanitize_symbol(event.currency) if event.currency else None
-    price = _format_price(event.price_native, listing_symbol)
     section = (
         title_name,
-        f"{'sold' if sold else 'listed'} on {CHAIN_NAMES[chain]}",
+        f"listed on {CHAIN_NAMES[chain]}",
         event.token_image_url,
         _lines(
             ("Seller", event.short_seller_address),
-            ("Price", f"~~{price}~~" if sold else price),
+            ("Price", _format_price(event.price_native, listing_symbol)),
             ("Marketplace", _format_marketplace(event.marketplace)),
         ),
     )
-    if sold:
-        return _card(SOLD_COLOR, [section], [])
     # A Forum One listing links to itself only; another marketplace's listing also browses
     # Forum One, to steer buyers there
     buttons = []

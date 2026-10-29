@@ -10,7 +10,6 @@ import pytest
 
 from app.chain.tests.conftest import MAIN_CHANNEL
 from app.core.store import EventKind, PostStatus
-from app.discord.nft_event_colors import SOLD_COLOR
 from app.marketplace.forum_one import ForumOneApi, ForumOneError
 from app.marketplace.tests.conftest import LE_CONTRACT, NOW, SELLER, Poller, le_collection, listing
 from app.nft.models import NFTListingEvent, NFTSaleEvent
@@ -300,44 +299,26 @@ async def test_listing_and_unlisting_four_times_leaves_only_the_live_post(poller
     assert len(poller.discord.deleted) == 4
 
 
-async def test_a_listing_that_vanishes_after_a_sale_is_edited_to_sold(poller: Poller) -> None:
-    await _posted_listing(poller)
-    stored = poller.store.events[EventKind.LISTING][0].event
-    assert isinstance(stored, NFTListingEvent)
-    await poller.store.insert_sale(
-        _sale(24, stored.event_timestamp + timedelta(seconds=5)), PostStatus.POSTED
-    )
-    poller.forum_one.listings = []
-    await poller.poller.poll_once()
-    assert poller.discord.deleted == []
-    [(_, _, card)] = poller.discord.edited
-    assert card.accent == SOLD_COLOR
-    assert card.buttons == []
-    assert card.values("Price") == ["~~0.02 ETH~~"]
-    assert "sold on Base" in card.text
-
-
-async def test_a_sale_edits_a_live_listing_and_a_later_vanish_does_nothing_more(
+async def test_a_sale_deletes_a_live_listing_and_a_later_vanish_does_nothing_more(
     poller: Poller,
 ) -> None:
     await _posted_listing(poller)
     sale = _sale(24, NOW + timedelta(minutes=1))
     await poller.store.insert_sale(sale, PostStatus.SKIPPED)
     await poller.publisher.settle_sale(poller.reloader.current.collections[0], sale)
-    [(_, _, card)] = poller.discord.edited
-    assert card.accent == SOLD_COLOR
+    assert len(poller.discord.deleted) == 1
+    assert poller.discord.edited == []
 
     poller.forum_one.listings = []
     await poller.poller.poll_once()
-    assert len(poller.discord.edited) == 1
-    assert poller.discord.deleted == []
+    assert len(poller.discord.deleted) == 1
 
 
 async def test_a_sale_by_another_seller_leaves_the_listing_alone(poller: Poller) -> None:
     await _posted_listing(poller)
     sale = _sale(24, NOW + timedelta(minutes=1), seller="0x" + "cc" * 20)
     await poller.publisher.settle_sale(poller.reloader.current.collections[0], sale)
-    assert poller.discord.edited == []
+    assert poller.discord.deleted == []
 
 
 async def test_a_forum_one_outage_deletes_nothing(poller: Poller) -> None:

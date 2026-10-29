@@ -183,33 +183,20 @@ class EventPublisher:
 
         await self._guarded(EventKind.LISTING, [event_id], work)
 
-    async def close_listing(
-        self, collection: Collection, stored: StoredListing, *, sold: bool
-    ) -> None:
-        """Mark a listing no longer live: edit its post to sold, or delete the post.
+    async def close_listing(self, collection: Collection, stored: StoredListing) -> None:
+        """Mark a listing no longer live (cancelled, expired or sold) and delete its post.
 
         A listing never posted has no message, so only its flags change. A failed Discord
         call is logged and leaves the listing active for the next try.
         """
         if stored.message_id is not None and stored.channel_id is not None:
             try:
-                if sold:
-                    await self.poster.mark_listing_sold(
-                        stored.event,
-                        collection.name,
-                        stored.channel_id,
-                        stored.message_id,
-                        collection.chain,
-                        collection.contract_address,
-                    )
-                else:
-                    await self.poster.delete_message(stored.channel_id, stored.message_id)
+                await self.poster.delete_message(stored.channel_id, stored.message_id)
             except DiscordAPIError as e:
                 logger.error(
                     "post.listing.close_failed",
                     collection=collection.collection_id,
                     listing_id=stored.event.listing_id,
-                    sold=sold,
                     error=str(e),
                 )
                 return
@@ -219,12 +206,12 @@ class EventPublisher:
         await self.store.set_listing_inactive(stored.id)
 
     async def settle_sale(self, collection: Collection, sale: NFTSaleEvent) -> None:
-        """A sale was recorded: mark the seller's live listings of that token sold."""
+        """A sale was recorded: close the seller's live listings of that token now, not at the next poll."""
         for stored in await self.store.list_active_listings_of_token(
             sale.collection_id, sale.token_id, sale.seller_address
         ):
             if stored.event.event_timestamp <= sale.event_timestamp:
-                await self.close_listing(collection, stored, sold=True)
+                await self.close_listing(collection, stored)
 
     async def retry_pending(self) -> None:
         """Expire pending events past 6 hours, post the rest again."""
