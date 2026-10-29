@@ -49,3 +49,10 @@ async def test_unreachable_node_is_a_connection_error() -> None:
     async with HttpTransport("http://127.0.0.1:1/") as transport:
         with pytest.raises(ChainConnectionError):
             await transport.request("eth_call", [])
+
+
+async def test_alchemy_keeps_its_response_error_on_a_non_200_with_an_rpc_error() -> None:
+    async for server in serve(429, {"jsonrpc": "2.0", "id": 1, "error": {"message": "limit"}}):
+        async with HttpTransport(str(server.make_url("/")), strict_status=False) as transport:
+            with pytest.raises(RpcResponseError):
+                await transport.request("eth_call", [])

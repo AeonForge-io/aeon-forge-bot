@@ -23,7 +23,7 @@ class CountingTransport:
         self._inner = inner
         self.calls = 0
 
-    async def request(self, method: str, params: list[Any]) -> Any:  # noqa: ANN401
+    async def request(self, method: str, params: list[Any]) -> Any:  # noqa: ANN401  # JSON-RPC results are untyped JSON
         self.calls += 1
         return await self._inner.request(method, params)
 

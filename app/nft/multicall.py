@@ -35,6 +35,11 @@ def word(value: int) -> bytes:
     return value.to_bytes(WORD, "big")
 
 
+def address_word(address: str) -> bytes:
+    """A hex address as one ABI word."""
+    return bytes.fromhex(address.removeprefix("0x")).rjust(WORD, b"\0")
+
+
 def padded(raw: bytes) -> bytes:
     """Bytes right-padded with zeros to a whole number of words."""
     return raw.ljust(-(-len(raw) // WORD) * WORD, b"\0")
@@ -44,9 +49,8 @@ def encode_aggregate3(calls: list[Call]) -> str:
     """The calldata of aggregate3 with allowFailure = true on every call."""
     tuples = []
     for call in calls:
-        target = bytes.fromhex(call.target.removeprefix("0x")).rjust(WORD, b"\0")
         tuples.append(
-            target
+            address_word(call.target)
             + word(1)
             + word(3 * WORD)  # the bytes start after the three head words
             + word(len(call.data))

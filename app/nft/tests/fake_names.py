@@ -3,7 +3,7 @@
 from typing import Any
 
 from app.core.store import Store
-from app.nft.multicall import AGGREGATE3_SELECTOR, MULTICALL3, WORD, padded, word
+from app.nft.multicall import AGGREGATE3_SELECTOR, MULTICALL3, WORD, address_word, padded, word
 from app.nft.wallet_names import (
     ADDR_SELECTOR,
     BASE_L2_RESOLVER,
@@ -23,10 +23,6 @@ from app.nft.wallet_names import (
 def _abi_string(text: str) -> bytes:
     raw = text.encode()
     return word(WORD) + word(len(raw)) + padded(raw)
-
-
-def _address_word(address: str) -> bytes:
-    return bytes.fromhex(address.removeprefix("0x")).rjust(WORD, b"\0")
 
 
 class FakeNameChain:
@@ -111,9 +107,7 @@ class FakeNameChain:
             ens_name = self._universal.get(address)
             if ens_name is None:
                 return None
-            return (
-                word(3 * WORD) + _address_word("0x" + "9" * 40) * 2 + _abi_string(ens_name)[WORD:]
-            )
+            return word(3 * WORD) + address_word("0x" + "9" * 40) * 2 + _abi_string(ens_name)[WORD:]
         if target == BASE_REVERSE_REGISTRAR:
             assert selector == NAME_FOR_ADDR_SELECTOR
             name = self._registrar_names.get("0x" + argument[12:WORD].hex())
@@ -121,13 +115,13 @@ class FakeNameChain:
         node = argument[:WORD].hex()
         if target == BASENAMES_REGISTRY:
             assert selector == RESOLVER_SELECTOR
-            return _address_word(self._registry.get(node, "0x" + "0" * 40))
+            return address_word(self._registry.get(node, "0x" + "0" * 40))
         if selector == NAME_SELECTOR:
             assert target == BASE_L2_RESOLVER
             return _abi_string(self._resolver_names.get(node, ""))
         assert selector == ADDR_SELECTOR
         forward = self._addresses.get((target, node))
-        return _address_word(forward or "0x" + "0" * 40)
+        return address_word(forward or "0x" + "0" * 40)
 
 
 def no_wallet_names(store: Store) -> WalletNames:

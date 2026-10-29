@@ -31,7 +31,16 @@ from app.chain.rpc import ChainConnectionError
 from app.core.logging import get_logger
 from app.core.store import Store, WalletNameRecord
 from app.nft.models import ZERO_ADDRESS
-from app.nft.multicall import Call, Requester, address_in, aggregate3, string_in, word
+from app.nft.multicall import (
+    Call,
+    Requester,
+    address_in,
+    address_word,
+    aggregate3,
+    padded,
+    string_in,
+    word,
+)
 from app.shared.exceptions import DatabaseError
 
 logger = get_logger(__name__)
@@ -84,7 +93,7 @@ def _universal_reverse(address: str) -> Call:
         + word(64)  # the bytes start after the two head words
         + word(ETHEREUM_COIN_TYPE)
         + word(len(raw))
-        + raw.ljust(32, b"\0")
+        + padded(raw)
     )
     return Call(UNIVERSAL_RESOLVER, data)
 
@@ -94,7 +103,7 @@ def _node_call(target: str, selector: str, node: bytes) -> Call:
 
 
 def _name_for_addr(address: str) -> Call:
-    data = bytes.fromhex(NAME_FOR_ADDR_SELECTOR) + _address_bytes(address).rjust(32, b"\0")
+    data = bytes.fromhex(NAME_FOR_ADDR_SELECTOR) + address_word(address)
     return Call(BASE_REVERSE_REGISTRAR, data)
 
 

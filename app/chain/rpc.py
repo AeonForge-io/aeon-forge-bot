@@ -53,8 +53,9 @@ class Transport(Protocol):
 class HttpTransport:
     """JSON-RPC calls over HTTP to any node URL, such as a free public RPC."""
 
-    def __init__(self, http_url: str) -> None:
+    def __init__(self, http_url: str, *, strict_status: bool = True) -> None:
         self._http_url = http_url
+        self._strict_status = strict_status
         self._session = aiohttp.ClientSession()
 
     async def __aenter__(self) -> Self:
@@ -72,7 +73,7 @@ class HttpTransport:
         payload = {"jsonrpc": "2.0", "id": 1, "method": method, "params": params}
         try:
             async with self._session.post(self._http_url, json=payload) as response:
-                if response.status != HTTP_OK:
+                if self._strict_status and response.status != HTTP_OK:
                     raise ChainConnectionError(f"{method} failed: HTTP {response.status}")
                 body = await response.json()
         except (aiohttp.ClientError, TimeoutError) as e:
@@ -90,7 +91,7 @@ class AlchemyTransport(HttpTransport):
         http_url = alchemy_rpc_url(chain)
         if http_url is None:
             raise ValueError(f"No Alchemy network for chain {chain}")
-        super().__init__(http_url)
+        super().__init__(http_url, strict_status=False)
         self._ws_url = "wss://" + http_url.removeprefix("https://")
 
     async def subscribe_logs(
