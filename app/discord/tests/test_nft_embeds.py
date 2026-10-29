@@ -194,6 +194,21 @@ async def test_listing_card_shows_the_coin_it_is_priced_in() -> None:
     assert card.values("Price") == ["12.5 USDC"]
 
 
+async def test_listing_card_from_another_marketplace_browses_forum_one() -> None:
+    event = NFTListingEvent(
+        collection_id=1,
+        token_id="42",
+        seller_address=ADDRESS,
+        marketplace="OpenSea",
+        price_native=Decimal("0.045"),
+        listing_id="0xorder",
+        event_timestamp=NOW,
+    )
+    card = Card(create_listing_card(event, "DragonZ", "base", CONTRACT))
+
+    assert card.buttons == [("Browse Forum One", BROWSE_URL)]
+
+
 async def test_sale_card_for_another_marketplace_still_browses_forum_one() -> None:
     event = NFTSaleEvent(
         collection_id=1,

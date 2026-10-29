@@ -59,6 +59,10 @@ CHAIN_NAMES: dict[str, str] = {
 FORUM_ONE_COLLECTION_URL = "https://forumone.io/collection/8453/{contract_address}"
 FORUM_ONE_NFT_URL = "https://forumone.io/token/8453/{contract_address}/{token_id}"
 
+# Token page per listing marketplace id; a listing from a marketplace not here has no link
+# to its own listing, only Browse Forum One
+LISTING_URLS: dict[str, str] = {"forum_one": FORUM_ONE_NFT_URL}
+
 # Internal marketplace ids; any other value is already a display name (from marketplace_marks)
 MARKETPLACE_DISPLAY_NAMES: dict[str, str] = {"forum_one": "Forum One"}
 
@@ -234,11 +238,19 @@ def create_listing_card(
             ("Marketplace", _format_marketplace(event.marketplace)),
         ),
     )
-    token_button = _link_button(
-        "View on Forum One",
-        FORUM_ONE_NFT_URL.format(contract_address=contract_address, token_id=event.token_id),
-    )
-    return _card(LISTING_COLOR, [section], [token_button])
+    # A Forum One listing links to itself only; another marketplace's listing also browses
+    # Forum One, to steer buyers there
+    buttons = []
+    if url := LISTING_URLS.get(event.marketplace):
+        buttons.append(
+            _link_button(
+                f"View on {_format_marketplace(event.marketplace)}",
+                url.format(contract_address=contract_address, token_id=event.token_id),
+            )
+        )
+    if event.marketplace != "forum_one":
+        buttons += _browse_button(chain, contract_address)
+    return _card(LISTING_COLOR, [section], buttons)
 
 
 def create_sale_card(
