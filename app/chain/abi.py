@@ -1,5 +1,7 @@
 """Splitting ABI-encoded receipt data into 32-byte words."""
 
+TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
+
 
 def word_hex(data: str) -> list[str]:
     """The 64-hex-char words of a log's data."""
