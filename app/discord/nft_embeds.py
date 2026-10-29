@@ -56,6 +56,7 @@ CHAIN_NAMES: dict[str, str] = {
 
 # Forum One serves Base only (chain id 8453) among the chains this bot tracks
 FORUM_ONE_COLLECTION_URL = "https://forumone.io/collection/8453/{contract_address}"
+FORUM_ONE_NFT_URL = "https://forumone.io/token/8453/{contract_address}/{token_id}"
 
 # Marketplace display name mapping
 MARKETPLACE_DISPLAY_NAMES: dict[str, str] = {
@@ -77,12 +78,15 @@ def _format_marketplace(marketplace: str) -> str:
     return MARKETPLACE_DISPLAY_NAMES.get(marketplace, marketplace.replace("_", " ").title())
 
 
-def _format_eth_price(price: Decimal | None, price_usd: Decimal | None = None) -> str:
-    """Format ETH price with optional USD value.
+def _format_eth_price(
+    price: Decimal | None, price_usd: Decimal | None = None, currency: str | None = None
+) -> str:
+    """Format a price in its coin (ETH when currency is None) with optional USD value.
 
     Args:
-        price: Price in ETH
+        price: Price in the coin
         price_usd: Optional USD value
+        currency: Coin symbol, None for ETH
 
     Returns:
         Formatted price string
@@ -90,7 +94,7 @@ def _format_eth_price(price: Decimal | None, price_usd: Decimal | None = None) -
     if price is None:
         return "N/A"
 
-    eth_str = f"{price:.4f}".rstrip("0").rstrip(".") + " ETH"
+    eth_str = f"{price:.4f}".rstrip("0").rstrip(".") + f" {currency or 'ETH'}"
 
     if price_usd is not None:
         usd_str = f"${price_usd:,.2f}"
@@ -267,12 +271,16 @@ def create_listing_card(
         event.token_image_url,
         _lines(
             ("Seller", event.short_seller_address),
-            ("Price", _format_eth_price(event.price_native, event.price_usd)),
+            ("Price", _format_eth_price(event.price_native, event.price_usd, event.currency)),
             ("Marketplace", _format_marketplace(event.marketplace)),
             ("Rarity", f"#{event.rarity_rank}" if event.rarity_rank else None),
         ),
     )
-    return _card(LISTING_COLOR, [section], _browse_button(chain, contract_address))
+    token_button = _link_button(
+        "View on Forum One",
+        FORUM_ONE_NFT_URL.format(contract_address=contract_address, token_id=event.token_id),
+    )
+    return _card(LISTING_COLOR, [section], [token_button, *_browse_button(chain, contract_address)])
 
 
 def create_sale_card(

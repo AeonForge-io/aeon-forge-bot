@@ -344,6 +344,10 @@ class DatabaseClient:
         rows = await self._pending("list_pending_burns", EventKind.BURN)
         return [(r["id"], NFTBurnEvent.model_validate(dict(r))) for r in rows]
 
+    async def list_pending_listings(self) -> list[tuple[int, NFTListingEvent]]:
+        rows = await self._pending("list_pending_listings", EventKind.LISTING)
+        return [(r["id"], NFTListingEvent.model_validate(dict(r))) for r in rows]
+
     async def set_post_status(self, kind: EventKind, event_id: int, status: PostStatus) -> None:
         # kind is an EventKind member, never user input, so naming the table is safe
         query = f"""
