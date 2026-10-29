@@ -30,6 +30,7 @@ from app.discord.event_publisher import EventPublisher
 from app.discord.nft_poster import NFTPoster
 from app.discord.tests.card_view import Card
 from app.nft.models import ZERO_ADDRESS
+from app.nft.tests.fake_names import no_wallet_names
 
 TEST_CHANNEL = 1215729486994210897
 MAIN_CHANNEL = 1445253310574755912
@@ -295,6 +296,7 @@ async def build_bot(chain: str, collection: Collection) -> Bot:
         store,
         reloader,
         NFTPoster(fake_discord),  # type: ignore[arg-type]  # FakeDiscord has the bot's client
+        no_wallet_names(store),
         clock.now,
     )
     reader = ChainReader(

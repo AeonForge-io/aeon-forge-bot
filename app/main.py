@@ -18,6 +18,7 @@ from app.discord.bot import DiscordBot
 from app.discord.event_publisher import EventPublisher
 from app.discord.nft_poster import NFTPoster
 from app.marketplace.forum_one import ForumOneApi, ForumOnePoller
+from app.nft.wallet_names import WalletNames
 from app.shared.exceptions import ConfigError, DatabaseError
 
 logger = get_logger(__name__)
@@ -94,7 +95,15 @@ async def startup() -> None:
     # The first reload reports every tracked chain as changed, which starts its reader,
     # so it runs only once everything a reader needs exists
     settings_reloader = SettingsReloader(database_client, on_contracts_changed)
-    event_publisher = EventPublisher(database_client, settings_reloader, NFTPoster(discord_bot))
+    # Names are per wallet, not per NFT chain: ENS lives on Ethereum, Basenames on Base
+    wallet_names = WalletNames(
+        await transports.enter_async_context(AlchemyTransport("ethereum")),
+        await transports.enter_async_context(AlchemyTransport("base")),
+        database_client,
+    )
+    event_publisher = EventPublisher(
+        database_client, settings_reloader, NFTPoster(discord_bot), wallet_names
+    )
     session = await transports.enter_async_context(aiohttp.ClientSession())
     forum_one_poller = ForumOnePoller(
         ForumOneApi(session), database_client, settings_reloader, event_publisher

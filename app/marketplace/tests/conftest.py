@@ -13,6 +13,7 @@ from app.core.store import Collection, EventKind, PostStatus
 from app.discord.event_publisher import EventPublisher
 from app.discord.nft_poster import NFTPoster
 from app.marketplace.forum_one import PAGE_SIZE, ForumOneError, ForumOnePoller
+from app.nft.tests.fake_names import no_wallet_names
 
 LE_CONTRACT = "0xa02fff7fe01eeb235cb65d501efc65c65d7ad509"
 SELLER = "0x9195312b2dc49eee39c4c1bcf89c0ace287930fd"
@@ -113,6 +114,7 @@ async def poller() -> Poller:
         store,
         reloader,
         NFTPoster(fake_discord),  # type: ignore[arg-type]  # FakeDiscord has the bot's client
+        no_wallet_names(store),
         clock.now,
     )
     return Poller(

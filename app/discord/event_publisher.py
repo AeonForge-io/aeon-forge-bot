@@ -20,6 +20,7 @@ from app.nft.models import (
     NFTSaleEvent,
     NFTTransferEvent,
 )
+from app.nft.wallet_names import WalletNames
 from app.shared.exceptions import DiscordAPIError
 
 logger = get_logger(__name__)
@@ -35,11 +36,13 @@ class EventPublisher:
         store: Store,
         reloader: SettingsReloader,
         poster: NFTPoster,
+        wallet_names: WalletNames,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
     ) -> None:
         self.store = store
         self.reloader = reloader
         self.poster = poster
+        self.wallet_names = wallet_names
         self.clock = clock
         # Events whose post is under way in this process; retry_pending leaves them alone.
         self._in_flight: set[tuple[EventKind, int]] = set()
@@ -78,12 +81,15 @@ class EventPublisher:
             for entries in by_transaction.values():
                 for first in range(0, len(entries), MAX_EMBEDS_PER_MESSAGE):
                     chunk = entries[first : first + MAX_EMBEDS_PER_MESSAGE]
+                    events = [event for _, event in chunk]
+                    names = await self.wallet_names.names(e.to_address for e in events)
                     try:
                         await self.poster.post_mints(
-                            [event for _, event in chunk],
+                            events,
                             collection.name,
                             collection.discord_channel_id,
                             collection.mint_url,
+                            names,
                         )
                     except DiscordAPIError as e:
                         logger.error(
@@ -103,13 +109,19 @@ class EventPublisher:
         """Post a transfer; a company sender shows its wallet label."""
 
         async def work() -> None:
+            from_label = self.reloader.current.company_label(event.from_address)
+            # A company sender shows its label, so only the other wallets need a name
+            names = await self.wallet_names.names(
+                [event.to_address] if from_label else [event.from_address, event.to_address]
+            )
             try:
                 await self.poster.post_transfer(
                     event,
                     collection.name,
                     collection.discord_channel_id,
                     collection.contract_address,
-                    self.reloader.current.company_label(event.from_address),
+                    from_label,
+                    names,
                 )
             except DiscordAPIError as e:
                 logger.error(
@@ -124,12 +136,14 @@ class EventPublisher:
         """Post a burn."""
 
         async def work() -> None:
+            names = await self.wallet_names.names([event.from_address])
             try:
                 await self.poster.post_burn(
                     event,
                     collection.name,
                     collection.discord_channel_id,
                     collection.contract_address,
+                    names,
                 )
             except DiscordAPIError as e:
                 logger.error("post.burn.failed", collection=collection.collection_id, error=str(e))
@@ -142,6 +156,7 @@ class EventPublisher:
         """Post a sale."""
 
         async def work() -> None:
+            names = await self.wallet_names.names([event.seller_address, event.buyer_address])
             try:
                 await self.poster.post_sale(
                     event,
@@ -149,6 +164,7 @@ class EventPublisher:
                     collection.discord_channel_id,
                     collection.chain,
                     collection.contract_address,
+                    names,
                 )
             except DiscordAPIError as e:
                 logger.error("post.sale.failed", collection=collection.collection_id, error=str(e))
@@ -163,6 +179,7 @@ class EventPublisher:
         """Post a marketplace listing."""
 
         async def work() -> None:
+            names = await self.wallet_names.names([event.seller_address])
             try:
                 message_id = await self.poster.post_listing(
                     event,
@@ -170,6 +187,7 @@ class EventPublisher:
                     collection.discord_channel_id,
                     collection.chain,
                     collection.contract_address,
+                    names,
                 )
             except DiscordAPIError as e:
                 logger.error(

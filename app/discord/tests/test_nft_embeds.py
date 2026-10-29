@@ -231,6 +231,48 @@ async def test_sale_card_for_another_marketplace_still_browses_forum_one() -> No
     assert card.buttons == [("Transaction", TX_URL), ("Browse Forum One", BROWSE_URL)]
 
 
+async def test_sale_card_shows_wallet_names_where_known_and_short_addresses_elsewhere() -> None:
+    buyer = "0x1111111111111111111111111111111111111111"
+    event = NFTSaleEvent(
+        collection_id=1,
+        token_id="42",
+        seller_address=ADDRESS,
+        buyer_address=buyer,
+        marketplace="OpenSea",
+        price_native=Decimal("0.5"),
+        sale_id=TX_HASH,
+        transaction_hash=TX_HASH,
+        event_timestamp=NOW,
+    )
+
+    both = Card(
+        create_sale_card(
+            event, "DragonZ", "base", CONTRACT, {ADDRESS: "alice.eth", buyer: "bob.base.eth"}
+        )
+    )
+    one = Card(create_sale_card(event, "DragonZ", "base", CONTRACT, {ADDRESS: "alice.eth"}))
+
+    assert both.values("Seller") == ["alice.eth"]
+    assert both.values("Buyer") == ["bob.base.eth"]
+    assert one.values("Seller") == ["alice.eth"]
+    assert one.values("Buyer") == ["0x1111...1111"]
+
+
+async def test_company_sender_keeps_its_label_over_a_wallet_name() -> None:
+    event = NFTTransferEvent(
+        collection_id=1,
+        token_id="42",
+        from_address=ADDRESS,
+        to_address="0x1111111111111111111111111111111111111111",
+        transaction_hash=TX_HASH,
+        event_timestamp=NOW,
+    )
+
+    card = Card(create_transfer_card(event, "DragonZ", CONTRACT, "Treasury", {ADDRESS: "evil.eth"}))
+
+    assert card.values("From") == ["Aeon Forge (Treasury)"]
+
+
 async def test_test_chain_posts_have_no_forum_one_button() -> None:
     event = NFTBurnEvent(
         collection_id=1,

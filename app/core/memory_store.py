@@ -14,6 +14,7 @@ from app.core.store import (
     MarkKind,
     PostStatus,
     StoredListing,
+    WalletNameRecord,
 )
 from app.nft.models import (
     NFTBurnEvent,
@@ -68,6 +69,7 @@ class MemoryStore:
         default_factory=lambda: {kind: [] for kind in EventKind}
     )
     baselines: set[tuple[int, str]] = field(default_factory=set)
+    wallet_names: dict[str, WalletNameRecord] = field(default_factory=dict)
     _next_id: int = 1
 
     # ---- Setup helpers (tests stand in for Adminer edits) ----
@@ -205,6 +207,12 @@ class MemoryStore:
             if stored.id == event_id:
                 stored.status = status
                 return
+
+    async def get_wallet_names(self, addresses: list[str]) -> dict[str, WalletNameRecord]:
+        return {a: self.wallet_names[a] for a in addresses if a in self.wallet_names}
+
+    async def set_wallet_names(self, record: WalletNameRecord) -> None:
+        self.wallet_names[record.address] = record
 
     async def has_marketplace_baseline(self, collection_id: int, marketplace: str) -> bool:
         return (collection_id, marketplace) in self.baselines

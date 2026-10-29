@@ -18,6 +18,8 @@ from app.chain.tests.conftest import (
 )
 from app.core.store import EventKind, PostStatus
 from app.nft.models import ZERO_ADDRESS
+from app.nft.tests.fake_names import FakeNameChain
+from app.nft.wallet_names import BASE_REVERSE_SUFFIX, ENS_REVERSE_SUFFIX, WalletNames
 
 TX_A = "0x" + "a1" * 32
 TX_B = "0x" + "b2" * 32
@@ -105,6 +107,30 @@ async def test_all_mode_posts_every_transfer_and_marks_company_senders(bot: Bot)
     company, plain = bot.discord.messages(TEST_CHANNEL)
     assert company.values("From") == ["Aeon Forge (Treasury)"]
     assert plain.values("From") == ["0x0000...00d2"]
+
+
+async def test_transfer_shows_wallet_names_and_leaves_a_company_sender_unresolved(
+    bot: Bot,
+) -> None:
+    ens = FakeNameChain(ENS_REVERSE_SUFFIX)
+    ens.set_name(TREASURY, "treasury.eth")
+    ens.set_name(HOLDER, "holder.eth")
+    bot.publisher.wallet_names = WalletNames(ens, FakeNameChain(BASE_REVERSE_SUFFIX), bot.store)
+    bot.store.add_company_wallet(TREASURY, "Treasury")
+    await set_mode(bot, "all")
+
+    await read_transfers(
+        bot,
+        transfer_log(TEST_CONTRACT, 1, 101, TX_A, 0, TREASURY, HOLDER),
+        transfer_log(TEST_CONTRACT, 2, 101, TX_B, 1, HOLDER, OTHER),
+    )
+
+    company, plain = bot.discord.messages(TEST_CHANNEL)
+    assert company.values("From") == ["Aeon Forge (Treasury)"]
+    assert company.values("To") == ["holder.eth"]
+    assert plain.values("From") == ["holder.eth"]
+    assert plain.values("To") == ["0x0000...00e3"]
+    assert TREASURY not in bot.store.wallet_names  # the label won, so it was never looked up
 
 
 async def test_wallet_added_in_the_store_is_picked_up_on_the_next_reload(bot: Bot) -> None:

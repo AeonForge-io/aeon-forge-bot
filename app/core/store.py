@@ -101,6 +101,16 @@ class StoredListing:
     message_id: int | None
 
 
+@dataclass(frozen=True)
+class WalletNameRecord:
+    """One wallet_names row: what the last lookup of an address found (None = no such name)."""
+
+    address: str
+    ens_name: str | None
+    base_name: str | None
+    checked_at: datetime
+
+
 class Store(Protocol):
     """Everything the bot reads from and writes to its database."""
 
@@ -157,6 +167,11 @@ class Store(Protocol):
     async def set_listing_inactive(self, event_id: int) -> None: ...
 
     async def set_post_status(self, kind: EventKind, event_id: int, status: PostStatus) -> None: ...
+
+    # Wallet primary names found on chain, cached by address
+    async def get_wallet_names(self, addresses: list[str]) -> dict[str, WalletNameRecord]: ...
+
+    async def set_wallet_names(self, record: WalletNameRecord) -> None: ...
 
     # Marketplace polling baseline, per collection and marketplace
     async def has_marketplace_baseline(self, collection_id: int, marketplace: str) -> bool: ...

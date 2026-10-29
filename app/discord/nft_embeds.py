@@ -1,6 +1,8 @@
 """Discord card builders for NFT events: one Components V2 message per event."""
 
+from collections.abc import Mapping
 from decimal import Decimal
+from types import MappingProxyType
 
 import discord
 from discord import ui
@@ -20,6 +22,15 @@ from app.nft.models import (
     NFTSaleEvent,
     NFTTransferEvent,
 )
+
+# Wallet display names by address; a card shows the short address for any wallet not in it
+NO_NAMES: Mapping[str, str] = MappingProxyType({})
+
+
+def _wallet(names: Mapping[str, str], address: str, short_address: str) -> str:
+    """The wallet's name when it has one, else its short address."""
+    return names.get(address) or short_address
+
 
 # Chain to block explorer URL mapping
 CHAIN_EXPLORERS: dict[str, str] = {
@@ -139,7 +150,10 @@ def _browse_button(chain: str, contract_address: str) -> list[ui.Button[ui.Layou
 
 
 def create_mint_card(
-    events: list[NFTMintEvent], collection_name: str, mint_url: str | None
+    events: list[NFTMintEvent],
+    collection_name: str,
+    mint_url: str | None,
+    names: Mapping[str, str] = NO_NAMES,
 ) -> ui.LayoutView:
     """Create the card for one mint transaction (one message), a section per token.
 
@@ -147,6 +161,7 @@ def create_mint_card(
         events: Mint events of one transaction, in one message
         collection_name: Human-readable collection name
         mint_url: Where to mint, or None for a collection that has no mint page
+        names: Wallet display names by address
 
     Returns:
         Layout view ready to send
@@ -158,7 +173,7 @@ def create_mint_card(
             f"minted on {CHAIN_NAMES[event.chain]}",
             event.token_image_url,
             _lines(
-                ("Minter", event.short_to_address),
+                ("Minter", _wallet(names, event.to_address, event.short_to_address)),
                 (
                     "Price",
                     _format_price(event.price_native) if event.price_native is not None else None,
@@ -189,6 +204,7 @@ def create_transfer_card(
     collection_name: str,
     contract_address: str,
     from_label: str | None,
+    names: Mapping[str, str] = NO_NAMES,
 ) -> ui.LayoutView:
     """Create the card for a transfer; from_label is the company wallet label of the sender."""
     section = (
@@ -196,8 +212,13 @@ def create_transfer_card(
         f"sent on {CHAIN_NAMES[event.chain]}",
         event.token_image_url,
         _lines(
-            ("From", f"Aeon Forge ({from_label})" if from_label else event.short_from_address),
-            ("To", event.short_to_address),
+            (
+                "From",
+                f"Aeon Forge ({from_label})"
+                if from_label
+                else _wallet(names, event.from_address, event.short_from_address),
+            ),
+            ("To", _wallet(names, event.to_address, event.short_to_address)),
         ),
     )
     buttons = _transaction_button(event.chain, event.transaction_hash) + _browse_button(
@@ -207,14 +228,17 @@ def create_transfer_card(
 
 
 def create_burn_card(
-    event: NFTBurnEvent, collection_name: str, contract_address: str
+    event: NFTBurnEvent,
+    collection_name: str,
+    contract_address: str,
+    names: Mapping[str, str] = NO_NAMES,
 ) -> ui.LayoutView:
     """Create the card for a burn."""
     section = (
         f"{collection_name} #{event.token_id}",
         f"burned on {CHAIN_NAMES[event.chain]}",
         event.token_image_url,
-        _lines(("Burned by", event.short_from_address)),
+        _lines(("Burned by", _wallet(names, event.from_address, event.short_from_address))),
     )
     buttons = _transaction_button(event.chain, event.transaction_hash) + _browse_button(
         event.chain, contract_address
@@ -227,6 +251,7 @@ def create_listing_card(
     collection_name: str,
     chain: str,
     contract_address: str,
+    names: Mapping[str, str] = NO_NAMES,
 ) -> ui.LayoutView:
     """Create the card for a marketplace listing (no transaction: listings are off-chain)."""
     title_name = event.token_name or f"{collection_name} #{event.token_id}"
@@ -236,7 +261,7 @@ def create_listing_card(
         f"listed on {CHAIN_NAMES[chain]}",
         event.token_image_url,
         _lines(
-            ("Seller", event.short_seller_address),
+            ("Seller", _wallet(names, event.seller_address, event.short_seller_address)),
             ("Price", _format_price(event.price_native, listing_symbol)),
             ("Marketplace", _format_marketplace(event.marketplace)),
         ),
@@ -257,7 +282,11 @@ def create_listing_card(
 
 
 def create_sale_card(
-    event: NFTSaleEvent, collection_name: str, chain: str, contract_address: str
+    event: NFTSaleEvent,
+    collection_name: str,
+    chain: str,
+    contract_address: str,
+    names: Mapping[str, str] = NO_NAMES,
 ) -> ui.LayoutView:
     """Create the card for a sale."""
     title_name = event.token_name or f"{collection_name} #{event.token_id}"
@@ -266,8 +295,8 @@ def create_sale_card(
         f"sold on {CHAIN_NAMES[chain]}",
         event.token_image_url,
         _lines(
-            ("Seller", event.short_seller_address),
-            ("Buyer", event.short_buyer_address),
+            ("Seller", _wallet(names, event.seller_address, event.short_seller_address)),
+            ("Buyer", _wallet(names, event.buyer_address, event.short_buyer_address)),
             (
                 "Seller received" if event.seller_received else "Price",
                 _format_price(event.price_native, event.currency),

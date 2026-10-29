@@ -1,11 +1,13 @@
 """Discord poster for NFT events."""
 
+from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
 import discord
 
 from app.core.logging import get_logger
 from app.discord.nft_embeds import (
+    NO_NAMES,
     create_burn_card,
     create_listing_card,
     create_mint_card,
@@ -75,6 +77,7 @@ class NFTPoster:
         collection_name: str,
         channel_id: int,
         mint_url: str | None,
+        names: Mapping[str, str] = NO_NAMES,
     ) -> None:
         """Post up to 10 mint tokens as one message (a V2 message holds 40 components).
 
@@ -83,11 +86,12 @@ class NFTPoster:
             collection_name: Human-readable collection name
             channel_id: Discord channel ID to post to
             mint_url: Where to mint, for the "Mint yours" button; None shows no button
+            names: Wallet display names by address
         """
         try:
             channel = await self._get_channel(channel_id)
             await channel.send(
-                view=create_mint_card(events, collection_name, mint_url),
+                view=create_mint_card(events, collection_name, mint_url, names),
                 allowed_mentions=NO_MENTIONS,
             )
 
@@ -116,6 +120,7 @@ class NFTPoster:
         channel_id: int,
         contract_address: str,
         from_label: str | None,
+        names: Mapping[str, str] = NO_NAMES,
     ) -> None:
         """Post transfer event to Discord.
 
@@ -125,11 +130,14 @@ class NFTPoster:
             channel_id: Discord channel ID to post to
             contract_address: NFT contract address (for the Forum One link)
             from_label: Company wallet label of the sender, None for any other sender
+            names: Wallet display names by address
         """
         try:
             channel = await self._get_channel(channel_id)
             await channel.send(
-                view=create_transfer_card(event, collection_name, contract_address, from_label),
+                view=create_transfer_card(
+                    event, collection_name, contract_address, from_label, names
+                ),
                 allowed_mentions=NO_MENTIONS,
             )
 
@@ -157,6 +165,7 @@ class NFTPoster:
         collection_name: str,
         channel_id: int,
         contract_address: str,
+        names: Mapping[str, str] = NO_NAMES,
     ) -> None:
         """Post burn event to Discord.
 
@@ -165,11 +174,12 @@ class NFTPoster:
             collection_name: Human-readable collection name
             channel_id: Discord channel ID to post to
             contract_address: NFT contract address (for the Forum One link)
+            names: Wallet display names by address
         """
         try:
             channel = await self._get_channel(channel_id)
             await channel.send(
-                view=create_burn_card(event, collection_name, contract_address),
+                view=create_burn_card(event, collection_name, contract_address, names),
                 allowed_mentions=NO_MENTIONS,
             )
 
@@ -198,6 +208,7 @@ class NFTPoster:
         channel_id: int,
         chain: str,
         contract_address: str,
+        names: Mapping[str, str] = NO_NAMES,
     ) -> int:
         """Post listing event to Discord and return the id of the sent message.
 
@@ -207,11 +218,12 @@ class NFTPoster:
             channel_id: Discord channel ID to post to
             chain: Blockchain network (for the Forum One link)
             contract_address: NFT contract address (for the Forum One link)
+            names: Wallet display names by address
         """
         try:
             channel = await self._get_channel(channel_id)
             message = await channel.send(
-                view=create_listing_card(event, collection_name, chain, contract_address),
+                view=create_listing_card(event, collection_name, chain, contract_address, names),
                 allowed_mentions=NO_MENTIONS,
             )
 
@@ -261,6 +273,7 @@ class NFTPoster:
         channel_id: int,
         chain: str,
         contract_address: str,
+        names: Mapping[str, str] = NO_NAMES,
     ) -> None:
         """Post sale event to Discord.
 
@@ -270,11 +283,12 @@ class NFTPoster:
             channel_id: Discord channel ID to post to
             chain: Blockchain network (for transaction link)
             contract_address: NFT contract address (for the Forum One link)
+            names: Wallet display names by address
         """
         try:
             channel = await self._get_channel(channel_id)
             await channel.send(
-                view=create_sale_card(event, collection_name, chain, contract_address),
+                view=create_sale_card(event, collection_name, chain, contract_address, names),
                 allowed_mentions=NO_MENTIONS,
             )
 

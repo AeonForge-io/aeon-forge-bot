@@ -18,6 +18,7 @@ from app.core.store import (
     MarketplaceMark,
     PostStatus,
     StoredListing,
+    WalletNameRecord,
 )
 from app.nft.models import (
     NFTBurnEvent,
@@ -423,6 +424,43 @@ class DatabaseClient:
             WHERE id = $1
         """  # noqa: S608
         await self._run("set_post_status", lambda conn: conn.execute(query, event_id, status.value))
+
+    # ==================== Wallet names ====================
+
+    async def get_wallet_names(self, addresses: list[str]) -> dict[str, WalletNameRecord]:
+        rows = await self._run(
+            "get_wallet_names",
+            lambda conn: conn.fetch(
+                """
+                SELECT address, ens_name, base_name, checked_at
+                FROM wallet_names WHERE address = ANY($1::text[])
+                """,
+                addresses,
+            ),
+        )
+        return {
+            row["address"]: WalletNameRecord(
+                row["address"], row["ens_name"], row["base_name"], row["checked_at"]
+            )
+            for row in rows
+        }
+
+    async def set_wallet_names(self, record: WalletNameRecord) -> None:
+        await self._run(
+            "set_wallet_names",
+            lambda conn: conn.execute(
+                """
+                INSERT INTO wallet_names (address, ens_name, base_name, checked_at)
+                VALUES ($1, $2, $3, $4)
+                ON CONFLICT (address) DO UPDATE
+                SET ens_name = $2, base_name = $3, checked_at = $4
+                """,
+                record.address,
+                record.ens_name,
+                record.base_name,
+                record.checked_at,
+            ),
+        )
 
     # ==================== Marketplace baseline ====================
 

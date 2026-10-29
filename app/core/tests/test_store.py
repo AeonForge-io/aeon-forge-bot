@@ -9,7 +9,7 @@ from decimal import Decimal
 
 from app.core.database import DatabaseClient
 from app.core.memory_store import MemoryStore
-from app.core.store import EventKind, PostStatus, Store
+from app.core.store import EventKind, PostStatus, Store, WalletNameRecord
 from app.nft.models import (
     NFTBurnEvent,
     NFTListingEvent,
@@ -153,6 +153,20 @@ async def test_cursor_round_trip(store_with_collection: tuple[Store, int]) -> No
     assert cursor is not None
     assert cursor.last_block == 101
     assert cursor.last_block_time == WHEN
+
+
+async def test_wallet_names_round_trip_and_update(store_with_collection: tuple[Store, int]) -> None:
+    store, _ = store_with_collection
+    assert await store.get_wallet_names([HOLDER, OTHER]) == {}
+    await store.set_wallet_names(WalletNameRecord(HOLDER, "holder.eth", None, WHEN))
+    await store.set_wallet_names(WalletNameRecord(OTHER, None, None, WHEN))
+    later = datetime(2026, 11, 4, tzinfo=UTC)
+    await store.set_wallet_names(WalletNameRecord(HOLDER, None, "holder.base.eth", later))
+
+    assert await store.get_wallet_names([HOLDER, OTHER, "0x" + "3" * 40]) == {
+        HOLDER: WalletNameRecord(HOLDER, None, "holder.base.eth", later),
+        OTHER: WalletNameRecord(OTHER, None, None, WHEN),
+    }
 
 
 async def test_marketplace_baseline(store_with_collection: tuple[Store, int]) -> None:
