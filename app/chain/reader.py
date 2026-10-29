@@ -14,7 +14,8 @@ from typing import Any, TypeVar
 
 from app.chain.abi import TRANSFER_TOPIC
 from app.chain.element import element_sales
-from app.chain.forum_one import ForumOneSale, forum_one_sales
+from app.chain.forum_one import DecodedSale, forum_one_sales
+from app.chain.other_marketplace import Payment, erc20_payment, trace_payment
 from app.chain.rarible import rarible_sale
 from app.chain.rpc import Block, ChainConnectionError, ChainRpc, SubscriptionError, hex_to_int
 from app.chain.seaport import SeaportSale, name_seaport_sale, seaport_sales
@@ -35,10 +36,11 @@ from app.nft.models import (
 
 logger = get_logger(__name__)
 
-_SaleT = TypeVar("_SaleT", ForumOneSale, SeaportSale)
+_SaleT = TypeVar("_SaleT", DecodedSale, SeaportSale)
 
 ELEMENT_MARKETPLACE = "Element"
 RARIBLE_MARKETPLACE = "Rarible"
+OTHER_MARKETPLACE = "Other marketplace"
 TOTAL_SUPPLY_SELECTOR = "0x18160ddd"
 MAX_SUPPLY_SELECTOR = "0xd5abeb01"
 
@@ -275,7 +277,7 @@ class ChainReader:
 
         A transfer that is part of a sale is kept as skipped: the sale is what gets posted.
         """
-        sale: ForumOneSale | SeaportSale | None = await self._forum_one_sale(
+        sale: DecodedSale | SeaportSale | None = await self._forum_one_sale(
             collection, transfer, receipts
         )
         if sale is not None:
@@ -286,16 +288,31 @@ class ChainReader:
         elif (rarible := await self._rarible_sale(collection, transfer, receipts)) is not None:
             sale = rarible
             await self._store_sale(block, collection, transfer, rarible, RARIBLE_MARKETPLACE)
-        else:
-            seaport = await self._seaport_sale(collection, transfer, receipts)
-            if seaport is not None:
-                sale = seaport
-                marketplace = name_seaport_sale(
-                    seaport,
-                    await self.rpc.transaction_input(transfer.tx_hash),
-                    self.reloader.current.marketplace_marks,
-                )
-                await self._store_sale(block, collection, transfer, seaport, marketplace)
+        elif (seaport := await self._seaport_sale(collection, transfer, receipts)) is not None:
+            sale = seaport
+            marketplace = name_seaport_sale(
+                seaport,
+                (await self.rpc.transaction(transfer.tx_hash)).input,
+                self.reloader.current.marketplace_marks,
+            )
+            await self._store_sale(block, collection, transfer, seaport, marketplace)
+        elif payment := await self._other_marketplace_payment(collection, transfer, receipts):
+            sale = DecodedSale(
+                transfer.contract,
+                transfer.token_id,
+                transfer.sender,
+                transfer.recipient,
+                payment.total_price,
+                payment.currency,
+            )
+            await self._store_sale(
+                block,
+                collection,
+                transfer,
+                sale,
+                OTHER_MARKETPLACE,
+                seller_received=payment.seller_received,
+            )
         is_company = self.reloader.current.company_label(transfer.sender) is not None
         posts = sale is None and (
             collection.transfer_mode == "all"
@@ -345,7 +362,7 @@ class ChainReader:
         collection: Collection,
         transfer: TransferLog,
         receipts: dict[str, list[dict[str, Any]]],
-    ) -> ForumOneSale | None:
+    ) -> DecodedSale | None:
         if collection.chain not in FORUM_ONE_CHAIN_IDS:
             return None  # the Forum One proxy is Base-only; test contracts are never decoded
         if not collection.track_marketplace or FORUM_ONE_MARKETPLACE not in collection.marketplaces:
@@ -357,7 +374,7 @@ class ChainReader:
         collection: Collection,
         transfer: TransferLog,
         receipts: dict[str, list[dict[str, Any]]],
-    ) -> ForumOneSale | None:
+    ) -> DecodedSale | None:
         if collection.chain not in FORUM_ONE_CHAIN_IDS or not collection.track_marketplace:
             return None  # ElementEx's address is Base's; test contracts are never decoded
         return await self._matching_sale(transfer, receipts, element_sales)
@@ -367,7 +384,7 @@ class ChainReader:
         collection: Collection,
         transfer: TransferLog,
         receipts: dict[str, list[dict[str, Any]]],
-    ) -> ForumOneSale | None:
+    ) -> DecodedSale | None:
         if collection.chain not in FORUM_ONE_CHAIN_IDS or not collection.track_marketplace:
             return None  # ExchangeMetaV2's address is Base's; test contracts are never decoded
         return rarible_sale(
@@ -389,13 +406,41 @@ class ChainReader:
             return None  # the Seaport addresses are Base's; test contracts are never decoded
         return await self._matching_sale(transfer, receipts, seaport_sales)
 
+    async def _other_marketplace_payment(
+        self,
+        collection: Collection,
+        transfer: TransferLog,
+        receipts: dict[str, list[dict[str, Any]]],
+    ) -> Payment | None:
+        """Payment to the seller, from the receipt, then the transaction, then a trace."""
+        if collection.chain not in FORUM_ONE_CHAIN_IDS or not collection.track_marketplace:
+            return None  # test contracts are never decoded
+        receipt_logs = await self._receipt_logs(transfer, receipts)
+        payment = erc20_payment(receipt_logs, transfer.sender, transfer.recipient)
+        if payment is not None:
+            return payment
+        tx = await self.rpc.transaction(transfer.tx_hash)
+        if tx.value_wei > 0 and tx.sender == transfer.recipient:
+            received = sum(
+                1
+                for t in transfer_logs(receipt_logs)
+                if t.recipient == transfer.recipient and self._collection(t.contract) is not None
+            )
+            return Payment(ZERO_ADDRESS, tx.value_wei // received, seller_received=False)
+        if tx.to == transfer.contract:
+            return None  # the NFT contract was called directly: a plain transfer
+        return trace_payment(
+            await self.rpc.call_trace(transfer.tx_hash), transfer.sender, transfer.recipient
+        )
+
     async def _store_sale(
         self,
         block: Block,
         collection: Collection,
         transfer: TransferLog,
-        sale: ForumOneSale | SeaportSale,
+        sale: DecodedSale | SeaportSale,
         marketplace: str,
+        seller_received: bool = False,
     ) -> None:
         if sale.currency == ZERO_ADDRESS:
             symbol, decimals = "ETH", 18
@@ -411,6 +456,7 @@ class ChainReader:
             marketplace=marketplace,
             price_native=Decimal(sale.total_price) / Decimal(10) ** decimals,
             currency=symbol,
+            seller_received=seller_received,
             sale_id=f"{transfer.tx_hash}:{transfer.token_id}",
             transaction_hash=transfer.tx_hash,
             event_timestamp=datetime.fromtimestamp(block.timestamp, UTC),
@@ -446,7 +492,7 @@ class ChainReader:
             minted_per_tx[mint.tx_hash] += 1
         price_per_token: dict[str, Decimal | None] = {}
         for tx_hash, count in minted_per_tx.items():
-            value = Decimal(await self.rpc.transaction_value_wei(tx_hash)) / WEI_PER_ETH
+            value = Decimal((await self.rpc.transaction(tx_hash)).value_wei) / WEI_PER_ETH
             price_per_token[tx_hash] = value / count if value > 0 else None
 
         status = PostStatus.PENDING if collection.post_mints else PostStatus.SKIPPED

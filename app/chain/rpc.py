@@ -6,7 +6,7 @@ The Transport protocol is the network boundary; tests fake it with Alchemy-shape
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from types import TracebackType
-from typing import Any, Protocol
+from typing import Any, Protocol, TypeVar
 
 import aiohttp
 
@@ -15,6 +15,8 @@ from app.shared.exceptions import AeonForgeBotError
 
 SYMBOL_SELECTOR = "0x95d89b41"
 DECIMALS_SELECTOR = "0x313ce567"
+TX_CACHE_SIZE = 256
+_T = TypeVar("_T")
 
 
 class ChainConnectionError(AeonForgeBotError):
@@ -111,6 +113,16 @@ class Block:
     timestamp: int
 
 
+@dataclass(frozen=True)
+class Transaction:
+    """The parts of a transaction the bot reads; to is None for a deployment."""
+
+    sender: str
+    to: str | None
+    value_wei: int
+    input: str
+
+
 def hex_to_int(value: str) -> int:
     """Decode a 0x quantity."""
     return int(value, 16)
@@ -122,6 +134,8 @@ class ChainRpc:
     def __init__(self, transport: Transport) -> None:
         self.transport = transport
         self._erc20_coins: dict[str, Coin] = {}
+        self._transactions: dict[str, Transaction] = {}
+        self._traces: dict[str, dict[str, Any]] = {}
 
     async def block(self, number: int | None = None) -> Block:
         """A block by number, or the head when number is None."""
@@ -153,16 +167,37 @@ class ChainRpc:
         )
         return hex_to_int(result)
 
-    async def transaction_value_wei(self, tx_hash: str) -> int:
-        """The ETH value (wei) sent with a transaction."""
-        tx = await self.transport.request("eth_getTransactionByHash", [tx_hash])
-        return hex_to_int(tx["value"])
+    async def transaction(self, tx_hash: str) -> Transaction:
+        """A transaction's sender, target, ETH value and calldata; kept for repeat reads."""
+        if tx_hash not in self._transactions:
+            tx = await self.transport.request("eth_getTransactionByHash", [tx_hash])
+            to = tx["to"]
+            self._remember(
+                self._transactions,
+                tx_hash,
+                Transaction(
+                    tx["from"].lower(),
+                    to.lower() if to else None,
+                    hex_to_int(tx["value"]),
+                    tx["input"],
+                ),
+            )
+        return self._transactions[tx_hash]
 
-    async def transaction_input(self, tx_hash: str) -> str:
-        """The calldata (0x hex) a transaction was sent with."""
-        tx = await self.transport.request("eth_getTransactionByHash", [tx_hash])
-        calldata: str = tx["input"]
-        return calldata
+    async def call_trace(self, tx_hash: str) -> dict[str, Any]:
+        """A transaction's call tree from Alchemy's callTracer, internal ETH transfers included."""
+        if tx_hash not in self._traces:
+            trace: dict[str, Any] = await self.transport.request(
+                "debug_traceTransaction", [tx_hash, {"tracer": "callTracer"}]
+            )
+            self._remember(self._traces, tx_hash, trace)
+        return self._traces[tx_hash]
+
+    @staticmethod
+    def _remember(cache: dict[str, _T], key: str, value: _T) -> None:
+        if len(cache) >= TX_CACHE_SIZE:
+            cache.clear()
+        cache[key] = value
 
     async def transaction_logs(self, tx_hash: str) -> list[dict[str, Any]]:
         """The logs of a transaction's receipt."""

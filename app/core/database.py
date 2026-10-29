@@ -268,10 +268,10 @@ class DatabaseClient:
             """
             INSERT INTO nft_sales (
                 collection_id, token_id, token_name, token_image_url, seller_address,
-                buyer_address, marketplace, price_native, price_usd, currency,
+                buyer_address, marketplace, price_native, price_usd, currency, seller_received,
                 floor_price_native, rarity_rank, sale_id, transaction_hash,
                 event_timestamp, post_status
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
             ON CONFLICT DO NOTHING
             RETURNING id
             """,
@@ -285,6 +285,7 @@ class DatabaseClient:
             event.price_native,
             event.price_usd,
             event.currency,
+            event.seller_received,
             event.floor_price_native,
             event.rarity_rank,
             event.sale_id,

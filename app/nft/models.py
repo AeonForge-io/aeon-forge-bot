@@ -275,6 +275,9 @@ class NFTSaleEvent(BaseModel):
     price_native: Decimal = Field(..., description="Price in ETH")
     price_usd: Decimal | None = Field(None, description="Price in USD")
     currency: str | None = Field(None, description="Coin symbol of the price")
+    seller_received: bool = Field(
+        False, description="Price is what the seller got, not the buyer's gross"
+    )
     floor_price_native: Decimal | None = Field(None, description="Floor price in ETH")
     rarity_rank: int | None = Field(None, description="Rarity rank")
     sale_id: str = Field(..., description="Marketplace sale ID")
