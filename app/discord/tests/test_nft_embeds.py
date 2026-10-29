@@ -141,7 +141,7 @@ async def test_burn_card() -> None:
     assert card.buttons == [("Transaction", TX_URL), ("Browse Forum One", BROWSE_URL)]
 
 
-async def test_listing_card_has_only_browse_and_names_the_marketplace() -> None:
+async def test_listing_card_links_the_token_and_names_the_marketplace() -> None:
     event = NFTListingEvent(
         collection_id=1,
         token_id="42",
@@ -161,7 +161,26 @@ async def test_listing_card_has_only_browse_and_names_the_marketplace() -> None:
     assert card.values("Price") == ["0.045 ETH"]
     assert card.values("Marketplace") == ["Forum One"]
     assert card.values("Rarity") == ["#12"]
-    assert card.buttons == [("Browse Forum One", BROWSE_URL)]
+    assert card.buttons == [
+        ("View on Forum One", f"https://forumone.io/token/8453/{CONTRACT}/42"),
+        ("Browse Forum One", BROWSE_URL),
+    ]
+
+
+async def test_listing_card_shows_the_coin_it_is_priced_in() -> None:
+    event = NFTListingEvent(
+        collection_id=1,
+        token_id="42",
+        seller_address=ADDRESS,
+        marketplace="forum_one",
+        price_native=Decimal("12.5"),
+        currency="USDC",
+        listing_id="0xorder",
+        event_timestamp=NOW,
+    )
+    card = Card(create_listing_card(event, "DragonZ", "base", CONTRACT))
+
+    assert card.values("Price") == ["12.5 USDC"]
 
 
 async def test_sale_card_for_another_marketplace_still_browses_forum_one() -> None:

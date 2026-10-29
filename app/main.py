@@ -5,6 +5,8 @@ import signal
 import sys
 from contextlib import AsyncExitStack
 
+import aiohttp
+
 from app.chain.reader import ChainReader
 from app.chain.rpc import AlchemyTransport, ChainRpc
 from app.core.config import get_settings
@@ -15,6 +17,7 @@ from app.core.settings_reload import SettingsReloader
 from app.discord.bot import DiscordBot
 from app.discord.event_publisher import EventPublisher
 from app.discord.nft_poster import NFTPoster
+from app.marketplace.forum_one import ForumOneApi, ForumOnePoller
 from app.shared.exceptions import ConfigError, DatabaseError
 
 logger = get_logger(__name__)
@@ -24,6 +27,7 @@ database_client: DatabaseClient | None = None
 discord_bot: DiscordBot | None = None
 event_publisher: EventPublisher | None = None
 settings_reloader: SettingsReloader | None = None
+forum_one_poller: ForumOnePoller | None = None
 chain_readers: dict[str, ChainReader] = {}
 chain_tasks: dict[str, asyncio.Task[None]] = {}
 transports: AsyncExitStack = AsyncExitStack()
@@ -67,7 +71,7 @@ async def on_contracts_changed(chain: str, contracts: frozenset[str]) -> None:
 
 async def startup() -> None:
     """Initialize application on startup."""
-    global database_client, discord_bot, event_publisher, settings_reloader
+    global database_client, discord_bot, event_publisher, settings_reloader, forum_one_poller
 
     settings = get_settings()
 
@@ -91,6 +95,10 @@ async def startup() -> None:
     # so it runs only once everything a reader needs exists
     settings_reloader = SettingsReloader(database_client, on_contracts_changed)
     event_publisher = EventPublisher(database_client, settings_reloader, NFTPoster(discord_bot))
+    session = await transports.enter_async_context(aiohttp.ClientSession())
+    forum_one_poller = ForumOnePoller(
+        ForumOneApi(session), database_client, settings_reloader, event_publisher
+    )
     await settings_reloader.reload()
 
     logger.info("application.initialization.completed")
@@ -140,23 +148,27 @@ async def main() -> None:
             raise RuntimeError("Settings reloader not started")
         if event_publisher is None:
             raise RuntimeError("Event publisher not started")
+        if forum_one_poller is None:
+            raise RuntimeError("Forum One poller not started")
         reload_task = asyncio.create_task(
             settings_reloader.run(after_reload=event_publisher.retry_pending)
         )
+        poll_task = asyncio.create_task(forum_one_poller.run())
         # A failed reader or reload ends the bot instead of leaving it half-running
         reader_wait = asyncio.create_task(reader_ended.wait())
         stop_wait = asyncio.create_task(stop_requested.wait())
         await asyncio.wait(
-            {reload_task, reader_wait, stop_wait}, return_when=asyncio.FIRST_COMPLETED
+            {reload_task, poll_task, reader_wait, stop_wait}, return_when=asyncio.FIRST_COMPLETED
         )
         reader_wait.cancel()
         stop_wait.cancel()
         if stop_requested.is_set():
             reload_task.cancel()
-            await asyncio.gather(reload_task, return_exceptions=True)
+            poll_task.cancel()
+            await asyncio.gather(reload_task, poll_task, return_exceptions=True)
             await shutdown()
             return
-        for task in (reload_task, *chain_tasks.values()):
+        for task in (reload_task, poll_task, *chain_tasks.values()):
             if task.done():
                 task.result()
 

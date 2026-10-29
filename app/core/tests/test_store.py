@@ -241,3 +241,10 @@ async def test_pending_events_are_listed_oldest_first_and_only_while_pending(
     assert [(s.token_id, s.currency, s.transaction_hash, s.sale_id) for s in pending_sales] == [
         ("4", "USDC", TX_A, f"{TX_A}:4")
     ]
+
+    pending_listing_id = await store.insert_listing(listing(cid, "0xp"), PostStatus.PENDING)
+    await store.insert_listing(listing(cid, "0xs"), PostStatus.SKIPPED)
+    assert pending_listing_id is not None
+    assert [(i, x.listing_id) for i, x in await store.list_pending_listings()] == [
+        (pending_listing_id, "0xp")
+    ]

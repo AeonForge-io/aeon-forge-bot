@@ -157,6 +157,11 @@ class MemoryStore:
     async def list_pending_sales(self) -> list[tuple[int, NFTSaleEvent]]:
         return [(i, e) for i, e in self._pending(EventKind.SALE) if isinstance(e, NFTSaleEvent)]
 
+    async def list_pending_listings(self) -> list[tuple[int, NFTListingEvent]]:
+        return [
+            (i, e) for i, e in self._pending(EventKind.LISTING) if isinstance(e, NFTListingEvent)
+        ]
+
     async def set_post_status(self, kind: EventKind, event_id: int, status: PostStatus) -> None:
         for stored in self.events[kind]:
             if stored.id == event_id:
