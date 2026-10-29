@@ -625,8 +625,18 @@ async def test_failed_checkpoint_reconnects_and_leaves_the_cursor(bot: Bot) -> N
 
 async def test_restart_20_minutes_after_the_last_checkpoint_skips_no_gap(bot: Bot) -> None:
     await start_at(bot, 100)
-    bot.alchemy.head = 100 + 20 * 60 // 2
+    clock, task = await run_open_subscription(bot)
+    # two checkpoints, each under 6 h after the last; together they pass 9 h from the start cursor
+    for head in (8000, 16000):
+        bot.alchemy.head = head
+        clock.fire()
+        await clock.wait_for_sleep()
+    await stop(task)
+    cursor = await bot.store.get_cursor("base-sepolia")
+    assert cursor is not None and cursor.last_block == 16000
 
+    bot.alchemy.head = 16000 + 20 * 60 // 2  # restart 20 minutes after the last checkpoint
+    bot.alchemy.hold_subscription_open = False
     with capture_logs() as logs:
         await bot.reader.connect_once()
 
