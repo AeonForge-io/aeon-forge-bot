@@ -9,9 +9,12 @@ import pytest
 from app.chain.seaport import ORDER_FULFILLED_TOPIC, SEAPORT_1_5, SEAPORT_1_6
 from app.chain.tests.conftest import (
     MAIN_CHANNEL,
+    TEST_CONTRACT,
     Bot,
     block_time,
     build_bot,
+    sepolia_collection,
+    transfer_log,
 )
 from app.chain.tests.test_forum_one_sales import (
     BUYER,
@@ -334,3 +337,66 @@ async def test_a_sale_is_not_decoded_when_marketplace_tracking_is_off() -> None:
     await read(bot, sale_transfer())
 
     assert bot.alchemy.receipt_requests == []
+
+
+async def test_a_bundle_order_splits_its_payment_across_its_nft_items(base_bot: Bot) -> None:
+    bundle = order_fulfilled(
+        offer=[nft_item(5), nft_item(6)],
+        consideration=[coin_item(3 * 10**18, recipient=SELLER)],
+        offerer=SELLER,
+        recipient=BUYER,
+    )
+    base_bot.alchemy.receipts[TX_A] = [bundle]
+
+    await read(base_bot, sale_transfer(5, log_index=0), sale_transfer(6, log_index=1))
+
+    cards = base_bot.discord.messages(MAIN_CHANNEL)
+    assert [c.values("Price") for c in cards] == [["1.5 ETH"], ["1.5 ETH"]]
+
+
+async def test_a_bundle_with_an_untracked_item_still_splits_by_all_nft_items(
+    base_bot: Bot,
+) -> None:
+    other_nft = [word(2), address_word("0x" + "99" * 20), word(1), word(1)]
+    bundle = order_fulfilled(
+        offer=[nft_item(5), other_nft],
+        consideration=[coin_item(3 * 10**18, recipient=SELLER)],
+        offerer=SELLER,
+        recipient=BUYER,
+    )
+    base_bot.alchemy.receipts[TX_A] = [bundle]
+
+    await read(base_bot, sale_transfer())
+
+    [card] = base_bot.discord.messages(MAIN_CHANNEL)
+    assert card.values("Price") == ["1.5 ETH"]
+
+
+async def test_an_nft_swap_with_a_fee_item_is_not_a_sale(base_bot: Bot) -> None:
+    [collection] = base_bot.store.collections
+    base_bot.store.update_collection(replace(collection, transfer_mode="all"))
+    await base_bot.reloader.reload()
+    swap = order_fulfilled(
+        offer=[nft_item(5)],
+        consideration=[nft_item(9, recipient=SELLER), coin_item(10**15, USDC, ROYALTY_WALLET)],
+        offerer=SELLER,
+        recipient=BUYER,
+    )
+    base_bot.alchemy.receipts[TX_A] = [swap]
+
+    await read(base_bot, sale_transfer())
+
+    assert base_bot.store.events[EventKind.SALE] == []
+    assert [s.status for s in base_bot.store.events[EventKind.TRANSFER]] == [PostStatus.POSTED]
+
+
+async def test_seaport_orders_are_not_decoded_off_base() -> None:
+    bot = await build_bot("base-sepolia", replace(sepolia_collection(), track_marketplace=True))
+    await bot.store.set_cursor("base-sepolia", 100, datetime.fromtimestamp(block_time(100), UTC))
+    bot.alchemy.head = 101
+    bot.alchemy.receipts[TX_A] = [listing_fill()]
+
+    await read(bot, transfer_log(TEST_CONTRACT, 5, 101, TX_A, 0, SELLER, BUYER))
+
+    assert bot.alchemy.receipt_requests == []
+    assert bot.store.events[EventKind.SALE] == []

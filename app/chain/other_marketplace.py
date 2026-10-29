@@ -21,11 +21,14 @@ class Payment:
 WORD_HEX_LENGTH = 66  # "0x" and one 32-byte word
 
 
-def erc20_payment(receipt_logs: list[dict[str, Any]], seller: str, buyer: str) -> Payment | None:
+def erc20_payment(
+    receipt_logs: list[dict[str, Any]], seller: str, buyer: str, token_count: int = 1
+) -> Payment | None:
     """The ERC-20 payment to the seller in a receipt, or None when no ERC-20 reaches the seller.
 
     The coin is the first token paid to the seller. The price is the buyer's gross outflow of that
     token (fees and royalties included); with none from the buyer, it is what the seller received.
+    Either is divided by token_count, the tracked tokens the transaction moved from seller to buyer.
     """
     transfers = [
         (
@@ -47,15 +50,18 @@ def erc20_payment(receipt_logs: list[dict[str, Any]], seller: str, buyer: str) -
         amount for token, payer, _, amount in transfers if token == coin and payer == buyer
     )
     if from_buyer:
-        return Payment(coin, from_buyer, seller_received=False)
+        return Payment(coin, from_buyer // token_count, seller_received=False)
     received = sum(amount for token, _, _, amount in paid_to_seller if token == coin)
-    return Payment(coin, received, seller_received=True)
+    return Payment(coin, received // token_count, seller_received=True)
 
 
-def trace_payment(trace: dict[str, Any], seller: str, buyer: str) -> Payment | None:
+def trace_payment(
+    trace: dict[str, Any], seller: str, buyer: str, token_count: int = 1
+) -> Payment | None:
     """The ETH payment in a callTracer trace, or None when no value call reaches the seller.
 
-    The price is the value the buyer's wallet sent out; with none from the buyer, it is no sale.
+    The price is the value the buyer's wallet sent out, divided by token_count; with none from the
+    buyer, it is no sale.
     """
     value_calls = _value_calls(trace)
     if not any(to == seller for _, to, _ in value_calls):
@@ -63,11 +69,13 @@ def trace_payment(trace: dict[str, Any], seller: str, buyer: str) -> Payment | N
     from_buyer = sum(value for sender, _, value in value_calls if sender == buyer)
     if not from_buyer:
         return None
-    return Payment(ZERO_ADDRESS, from_buyer, seller_received=False)
+    return Payment(ZERO_ADDRESS, from_buyer // token_count, seller_received=False)
 
 
 def _value_calls(call: dict[str, Any]) -> list[tuple[str, str, int]]:
-    """Every (from, to, value) in the call tree that carries ETH."""
+    """Every (from, to, value) in the call tree that carries ETH, skipping reverted frames."""
+    if call.get("error"):
+        return []  # a reverted frame and everything under it moved no ETH
     found = []
     value = int(call.get("value", "0x0"), 16)
     if value:

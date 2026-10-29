@@ -403,21 +403,26 @@ class ChainReader:
         if collection.chain not in FORUM_ONE_CHAIN_IDS or not collection.track_marketplace:
             return None  # test contracts are never decoded
         receipt_logs = await self._receipt_logs(transfer, receipts)
-        payment = erc20_payment(receipt_logs, transfer.sender, transfer.recipient)
+        moved = max(
+            1,
+            sum(
+                1
+                for t in transfer_logs(receipt_logs)
+                if t.sender == transfer.sender
+                and t.recipient == transfer.recipient
+                and self._collection(t.contract) is not None
+            ),
+        )  # a bundle's payment is split across the tracked tokens moved from seller to buyer
+        payment = erc20_payment(receipt_logs, transfer.sender, transfer.recipient, moved)
         if payment is not None:
             return payment
         tx = await self.rpc.transaction(transfer.tx_hash)
         if tx.value_wei > 0 and tx.sender == transfer.recipient:
-            received = sum(
-                1
-                for t in transfer_logs(receipt_logs)
-                if t.recipient == transfer.recipient and self._collection(t.contract) is not None
-            )
-            return Payment(ZERO_ADDRESS, tx.value_wei // received, seller_received=False)
+            return Payment(ZERO_ADDRESS, tx.value_wei // moved, seller_received=False)
         if tx.to == transfer.contract:
             return None  # the NFT contract was called directly: a plain transfer
         return trace_payment(
-            await self.rpc.call_trace(transfer.tx_hash), transfer.sender, transfer.recipient
+            await self.rpc.call_trace(transfer.tx_hash), transfer.sender, transfer.recipient, moved
         )
 
     async def _find_sale(

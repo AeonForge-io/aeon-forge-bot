@@ -161,7 +161,7 @@ async def test_post_sales_off_records_the_rarible_sale_as_skipped(base_bot: Bot)
 
 
 async def test_test_contract_sales_are_never_decoded() -> None:
-    bot = await build_bot("base-sepolia", sepolia_collection())
+    bot = await build_bot("base-sepolia", replace(sepolia_collection(), track_marketplace=True))
     await bot.store.set_cursor("base-sepolia", 100, datetime.fromtimestamp(block_time(100), UTC))
     bot.alchemy.head = 101
     bot.alchemy.receipts[TX_A] = [match_log(1, 10**14)]

@@ -164,7 +164,7 @@ async def test_a_look_alike_event_from_another_contract_is_ignored(base_bot: Bot
 
 
 async def test_test_contract_sales_are_never_decoded() -> None:
-    bot = await build_bot("base-sepolia", sepolia_collection())
+    bot = await build_bot("base-sepolia", replace(sepolia_collection(), track_marketplace=True))
     await bot.store.set_cursor("base-sepolia", 100, datetime.fromtimestamp(block_time(100), UTC))
     bot.alchemy.head = 101
     bot.alchemy.receipts[TX_A] = [element_log(ERC721_SELL, 5, 10**18, nft=TEST_CONTRACT)]

@@ -1,6 +1,7 @@
 """The fallback: a tracked transfer paid for outside every named marketplace posts as a sale."""
 
 from collections.abc import MutableMapping
+from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Any
 
@@ -11,9 +12,11 @@ from app.chain.abi import TRANSFER_TOPIC
 from app.chain.rpc import SYMBOL_SELECTOR, ChainConnectionError, RpcResponseError
 from app.chain.tests.conftest import (
     MAIN_CHANNEL,
+    TEST_CONTRACT,
     Bot,
     block_time,
     build_bot,
+    sepolia_collection,
     transfer_log,
 )
 from app.chain.tests.test_forum_one_sales import (
@@ -287,3 +290,55 @@ async def test_a_connection_failure_during_detection_leaves_the_block_to_retry(
     assert cursor is not None
     assert cursor.last_block == 100
     assert transfer_statuses(base_bot) == []
+
+
+async def test_two_tokens_in_one_erc20_buy_split_the_amount(base_bot: Bot) -> None:
+    base_bot.alchemy.receipts[TX_A] = [
+        erc20_transfer(USDC, BUYER, SELLER, 90 * 10**6),
+        erc20_transfer(USDC, BUYER, FEE_WALLET, 10 * 10**6),
+    ]
+
+    await read(base_bot, 5, 6)
+
+    cards = base_bot.discord.messages(MAIN_CHANNEL)
+    assert [c.values("Price") for c in cards] == [["50 USDC"], ["50 USDC"]]
+
+
+async def test_two_tokens_in_one_trace_buy_split_the_value(base_bot: Bot) -> None:
+    base_bot.alchemy.tx_senders[TX_A] = RELAYER
+    base_bot.alchemy.tx_targets[TX_A] = SMART_WALLET
+    base_bot.alchemy.traces[TX_A] = call(RELAYER, SMART_WALLET, 0, [call(BUYER, SELLER, ETH // 10)])
+
+    await read(base_bot, 5, 6)
+
+    cards = base_bot.discord.messages(MAIN_CHANNEL)
+    assert [c.values("Price") for c in cards] == [["0.05 ETH"], ["0.05 ETH"]]
+
+
+async def test_a_reverted_eth_subcall_to_the_seller_is_not_counted(base_bot: Bot) -> None:
+    base_bot.alchemy.tx_senders[TX_A] = RELAYER
+    base_bot.alchemy.tx_targets[TX_A] = SMART_WALLET
+    reverted = {**call(BUYER, SELLER, 5 * ETH), "error": "execution reverted"}
+    reverted["calls"] = [call(SELLER, FEE_WALLET, ETH)]
+    base_bot.alchemy.traces[TX_A] = call(
+        RELAYER, SMART_WALLET, 0, [reverted, call(BUYER, SELLER, ETH // 10)]
+    )
+
+    await read(base_bot)
+
+    [card] = base_bot.discord.messages(MAIN_CHANNEL)
+    assert card.values("Price") == ["0.1 ETH"]
+
+
+async def test_other_marketplace_sales_are_not_decoded_off_base() -> None:
+    bot = await build_bot("base-sepolia", replace(sepolia_collection(), track_marketplace=True))
+    await bot.store.set_cursor("base-sepolia", 100, datetime.fromtimestamp(block_time(100), UTC))
+    bot.alchemy.head = 101
+    bot.alchemy.tx_values_wei[TX_A] = ETH // 10
+    bot.alchemy.tx_senders[TX_A] = BUYER
+
+    bot.alchemy.logs = [transfer_log(TEST_CONTRACT, 5, 101, TX_A, 0, SELLER, BUYER)]
+    await bot.reader.connect_once()
+
+    assert bot.alchemy.receipt_requests == []
+    assert bot.store.events[EventKind.SALE] == []

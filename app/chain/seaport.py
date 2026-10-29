@@ -85,6 +85,9 @@ def _payment(items: list[SeaportItem]) -> tuple[int, str]:
 def seaport_sales(receipt_logs: list[dict[str, Any]]) -> list[SeaportSale]:
     """The tracked-token sales among a receipt's logs: one per NFT item of each fulfilled order.
 
+    An order's payment is split evenly across all its NFT items; a swap (NFTs on both sides)
+    is skipped.
+
     A listing fill has the NFT in the offer and the payment in the consideration (fees and
     royalties included); an offer fill has the payment in the offer and the NFT in the
     consideration, with the fee items already part of the offered amount.
@@ -101,7 +104,10 @@ def seaport_sales(receipt_logs: list[dict[str, Any]]) -> list[SeaportSale]:
         recipient = address(data[1])
         offer = _items(data, 2, 4, with_recipient=False)
         consideration = _items(data, 3, 5, with_recipient=True)
-        if any(item.item_type in NFT_ITEM_TYPES for item in offer):
+        offers_nft = any(item.item_type in NFT_ITEM_TYPES for item in offer)
+        if offers_nft and any(item.item_type in NFT_ITEM_TYPES for item in consideration):
+            continue  # an NFT-for-NFT swap is not a sale, whatever fee item rides along
+        if offers_nft:
             nfts = [item for item in offer if item.item_type in NFT_ITEM_TYPES]
             payments = [item for item in consideration if item.item_type not in NFT_ITEM_TYPES]
             seller, buyer = offerer, recipient
@@ -119,13 +125,14 @@ def seaport_sales(receipt_logs: list[dict[str, Any]]) -> list[SeaportSale]:
             for item in consideration
             if item.recipient and item.item_type not in NFT_ITEM_TYPES
         )
+        share = total_price // len(nfts)  # a bundle's payment is split across its NFT items
         sales.extend(
             SeaportSale(
                 nft.token,
                 nft.identifier,
                 seller,
                 buyer,
-                total_price,
+                share,
                 currency,
                 zone,
                 fee_recipients,
