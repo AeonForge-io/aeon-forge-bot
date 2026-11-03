@@ -21,3 +21,5 @@ scripts/check.sh test     # pytest (Postgres integration tests skip without TEST
 Each command syncs its own Python 3.11 environment from `uv.lock`. To fix formatting: `uv run ruff format app tests scripts`.
 
 `scripts/lint_baseline.json` holds the findings that existed when the checks were added, counted per (file, rule); only new findings fail. After fixing some, run `scripts/check.sh lint --update` to lower the baseline. It may only go down, unless the commit message says why it went up. detect-secrets and pip-audit have no baseline; fix an advisory with `uv lock --upgrade-package NAME`.
+
+The baseline also covers Ruff's function-size rules C901, PLR0915 and PLR0912 (Ruff's default thresholds). The Review lint check also runs Stixed's global code size check (`check_file_size.py --base main`, default limits, no `filesize.toml`), the same one the global commit hook runs.
