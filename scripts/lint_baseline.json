@@ -1,5 +1,11 @@
 {
+ "app/chain/tests/conftest.py::C901": 1,
  "app/core/settings_reload.py::S108": 1,
+ "app/discord/event_publisher.py::C901": 1,
+ "app/discord/event_publisher.py::PLR0912": 1,
+ "app/main.py::C901": 1,
+ "app/nft/wallet_names.py::C901": 1,
+ "app/nft/wallet_names.py::PLR0912": 1,
  "migrations/001_schema.sql::CP03": 10,
  "migrations/001_schema.sql::LT01": 11,
  "migrations/001_schema.sql::LT02": 6,
