@@ -7,9 +7,9 @@ from app.core.config import Settings, get_settings
 from app.shared.exceptions import ConfigError
 
 REQUIRED_ENV = {
-    "DISCORD_TOKEN": "discord_token",
-    "ALCHEMY_API_KEY": "alchemy_key",
-    "DB_PASSWORD": "db_password",
+    "DISCORD_TOKEN": "discord_token",  # pragma: allowlist secret
+    "ALCHEMY_API_KEY": "alchemy_key",  # pragma: allowlist secret
+    "DB_PASSWORD": "db_password",  # pragma: allowlist secret
 }
 
 
@@ -25,8 +25,8 @@ def test_settings_load_with_only_three_env_vars(required_env: None) -> None:
     settings = Settings(_env_file=None)
 
     assert settings.discord_token == "discord_token"
-    assert settings.alchemy_api_key == "alchemy_key"
-    assert settings.db_password == "db_password"
+    assert settings.alchemy_api_key == "alchemy_key"  # pragma: allowlist secret
+    assert settings.db_password == "db_password"  # pragma: allowlist secret
     assert settings.log_level == "INFO"
     assert settings.db_name == "aeon_forge_bot"
     assert settings.db_user == "aeon_forge_bot"

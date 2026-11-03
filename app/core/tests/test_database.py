@@ -18,7 +18,7 @@ def mock_settings() -> Generator[MagicMock, None, None]:
     settings.db_port = 5432
     settings.db_name = "test_db"
     settings.db_user = "test_user"
-    settings.db_password = "test_password"
+    settings.db_password = "test_password"  # pragma: allowlist secret
     yield settings
 
 

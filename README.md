@@ -13,8 +13,11 @@ Aeon Forge's Discord bot (the Forge Bot). It posts NFT activity for Aeon Forge c
 ## Development
 
 ```
-uv sync --extra dev
-uv run pytest
-uv run ruff check app tests scripts
-uv run mypy app tests
+scripts/check.sh format   # ruff format --check on app, tests, scripts
+scripts/check.sh lint     # ruff, mypy strict, sqlfluff on migrations, detect-secrets, pip-audit
+scripts/check.sh test     # pytest (Postgres integration tests skip without TEST_DATABASE_URL)
 ```
+
+Each command syncs its own Python 3.11 environment from `uv.lock`. To fix formatting: `uv run ruff format app tests scripts`.
+
+`scripts/lint_baseline.json` holds the findings that existed when the checks were added, counted per (file, rule); only new findings fail. After fixing some, run `scripts/check.sh lint --update` to lower the baseline. It may only go down, unless the commit message says why it went up. detect-secrets and pip-audit have no baseline; fix an advisory with `uv lock --upgrade-package NAME`.
