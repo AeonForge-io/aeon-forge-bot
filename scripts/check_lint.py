@@ -3,7 +3,7 @@
 Usage: scripts/check.sh lint            non-zero on any new finding.
        scripts/check.sh lint --update   rewrite scripts/lint_baseline.json
 
-Runs ruff check (the rules in pyproject.toml), mypy strict and `sqlfluff lint --dialect postgres migrations/`.
+Runs ruff check (the rules in pyproject.toml), mypy strict and `sqlfluff lint migrations/` (dialect postgres, set in .sqlfluff).
 The baseline holds a count per (file, rule): a ruff code, a mypy error code or a sqlfluff rule. A file may
 keep its old count of a rule but not exceed it. Fixing findings lowers nothing automatically: run --update to
 ratchet the baseline down. The baseline may only go down, unless the commit message says why it went up.
@@ -89,9 +89,7 @@ def mypy_counts() -> Counter[str]:
 
 
 def sqlfluff_counts() -> Counter[str]:
-    result = run(
-        python_tool("sqlfluff", "lint", "--dialect", "postgres", "--format", "json", "migrations")
-    )
+    result = run(python_tool("sqlfluff", "lint", "--format", "json", "migrations"))
     # sqlfluff exits 1 when it reports violations; anything else non-zero, or no report, is a crash.
     if result.returncode not in (0, 1) or not result.stdout.strip():
         raise ToolFailedError(
