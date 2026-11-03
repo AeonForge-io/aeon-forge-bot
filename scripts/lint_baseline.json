@@ -1,1 +1,26 @@
-{}
+{
+ "app/core/settings_reload.py::S108": 1,
+ "migrations/001_schema.sql::CP03": 10,
+ "migrations/001_schema.sql::LT01": 11,
+ "migrations/001_schema.sql::LT02": 6,
+ "migrations/001_schema.sql::LT05": 8,
+ "migrations/001_schema.sql::RF04": 8,
+ "migrations/002_seed_collections.sql::LT02": 15,
+ "migrations/002_seed_collections.sql::LT05": 1,
+ "migrations/003_seed_marketplace_marks.sql::LT02": 60,
+ "migrations/003_seed_marketplace_marks.sql::LT05": 7,
+ "migrations/004_collection_image_urls.sql::LT02": 2,
+ "migrations/004_collection_image_urls.sql::LT03": 2,
+ "migrations/004_collection_image_urls.sql::LT05": 4,
+ "migrations/005_test_image_folder.sql::LT02": 1,
+ "migrations/005_test_image_folder.sql::LT03": 1,
+ "migrations/005_test_image_folder.sql::LT05": 2,
+ "migrations/006_collection_mint_urls.sql::LT05": 1,
+ "migrations/007_drop_aggregator_marks.sql::LT02": 11,
+ "migrations/007_drop_aggregator_marks.sql::LT05": 2,
+ "migrations/008_sale_seller_received.sql::LT05": 1,
+ "migrations/009_drop_unused_price_columns.sql::LT02": 6,
+ "migrations/010_listing_messages.sql::LT02": 2,
+ "migrations/010_listing_messages.sql::LT05": 1,
+ "migrations/011_wallet_names.sql::LT05": 2
+}
