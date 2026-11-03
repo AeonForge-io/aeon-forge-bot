@@ -7,9 +7,9 @@ from app.core.config import Settings, get_settings
 from app.shared.exceptions import ConfigError
 
 REQUIRED_ENV = {
-    "DISCORD_TOKEN": "discord_token",
-    "ALCHEMY_API_KEY": "alchemy_key",
-    "DB_PASSWORD": "db_password",
+    "DISCORD_TOKEN": "discord_token",  # pragma: allowlist secret
+    "ALCHEMY_API_KEY": "alchemy_key",  # pragma: allowlist secret
+    "DB_PASSWORD": "db_password",  # pragma: allowlist secret
 }
 
 
