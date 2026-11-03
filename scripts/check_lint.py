@@ -23,12 +23,16 @@ import subprocess
 import sys
 from collections import Counter
 from pathlib import Path
+from typing import TypeVar
 
 ROOT = Path(__file__).resolve().parent.parent
 BASELINE = ROOT / "scripts" / "lint_baseline.json"
 TARGETS = ["app", "tests", "scripts"]
 SCRATCH = Path.home() / ".cache" / "aeon-forge-bot"
 AUDIT_CACHE = Path.home() / ".cache" / "pip-audit"
+
+
+Parsed = TypeVar("Parsed")
 
 
 class ToolFailedError(Exception):
@@ -47,11 +51,14 @@ def relative(path: str) -> str:
     return str(Path(path).relative_to(ROOT)) if Path(path).is_absolute() else path
 
 
-def parse_json(tool: str, text: str) -> object:
+def parse_json(tool: str, text: str, kind: type[Parsed]) -> Parsed:
     try:
-        return json.loads(text)
+        parsed = json.loads(text)
     except json.JSONDecodeError as error:
         raise ToolFailedError(f"{tool} output is not JSON: {error}") from error
+    if not isinstance(parsed, kind):
+        raise ToolFailedError(f"{tool} output is not a JSON {kind.__name__}")
+    return parsed
 
 
 def ruff_counts() -> Counter[str]:
@@ -62,8 +69,7 @@ def ruff_counts() -> Counter[str]:
         )
     if "warning" in result.stderr.lower():
         raise ToolFailedError(f"ruff warned:\n{result.stderr}")
-    findings = parse_json("ruff", result.stdout)
-    assert isinstance(findings, list)
+    findings = parse_json("ruff", result.stdout, list)
     return Counter(f"{relative(f['filename'])}::{f['code']}" for f in findings)
 
 
@@ -76,8 +82,7 @@ def mypy_counts() -> Counter[str]:
         )
     counts: Counter[str] = Counter()
     for line in filter(str.strip, result.stdout.splitlines()):
-        diagnostic = parse_json("mypy", line)
-        assert isinstance(diagnostic, dict)
+        diagnostic = parse_json("mypy", line, dict)
         if diagnostic["severity"] == "error":
             counts[f"{relative(diagnostic['file'])}::{diagnostic['code']}"] += 1
     return counts
@@ -92,8 +97,7 @@ def sqlfluff_counts() -> Counter[str]:
         raise ToolFailedError(
             f"sqlfluff did not run (exit {result.returncode}):\n{result.stderr}{result.stdout}"
         )
-    files = parse_json("sqlfluff", result.stdout)
-    assert isinstance(files, list)
+    files = parse_json("sqlfluff", result.stdout, list)
     return Counter(
         f"{relative(file['filepath'])}::{violation['code']}"
         for file in files
@@ -116,8 +120,7 @@ def secret_findings() -> list[str]:
         raise ToolFailedError(
             f"detect-secrets did not run (exit {result.returncode}):\n{result.stderr}{result.stdout}"
         )
-    report = parse_json("detect-secrets", result.stdout)
-    assert isinstance(report, dict)
+    report = parse_json("detect-secrets", result.stdout, dict)
     return [
         f"{name}:{hit['line_number']} {hit['type']}"
         for name, hits in sorted(report["results"].items())
@@ -156,8 +159,7 @@ def audit_findings() -> list[str]:
         raise ToolFailedError(
             f"pip-audit did not run (exit {result.returncode}):\n{result.stderr}{result.stdout}"
         )
-    report = parse_json("pip-audit", result.stdout)
-    assert isinstance(report, dict)
+    report = parse_json("pip-audit", result.stdout, dict)
     dependencies = report["dependencies"]
     skipped = [
         f"{dependency['name']} {dependency.get('version', '?')}: {dependency.get('skip_reason', 'no vulns reported')}"
