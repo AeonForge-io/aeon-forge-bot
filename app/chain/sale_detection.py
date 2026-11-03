@@ -1,7 +1,4 @@
-"""Sale detection for the chain reader: which marketplace a transfer was sold on, and for how much.
-
-Split out of app.chain.reader; ChainReader mixes SaleDetection in and uses TransferLog and FoundSale.
-"""
+"""Sale detection for the chain reader: which marketplace a transfer was sold on, and for how much."""
 
 import asyncio
 from collections.abc import Callable
@@ -76,6 +73,7 @@ class SaleDetection:
     chain: str
     rpc: ChainRpc
     reloader: SettingsReloader
+    _collection: Callable[[str], Collection | None]
 
     async def _receipt_logs(
         self, transfer: TransferLog, receipts: dict[str, list[dict[str, Any]]]
@@ -255,14 +253,3 @@ class SaleDetection:
             coin = await self.rpc.erc20_coin(sale.currency)
             symbol, decimals = coin_label(sale.currency, coin.symbol), coin.decimals
         return FoundSale(sale, marketplace, seller_received, symbol, decimals)
-
-    def _collection(self, contract: str) -> Collection | None:
-        for collection in self.reloader.current.collections:
-            if (
-                collection.chain == self.chain
-                and collection.contract_address == contract
-                and collection.is_active
-                and collection.track_onchain
-            ):
-                return collection
-        return None

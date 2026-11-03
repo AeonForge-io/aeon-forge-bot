@@ -283,6 +283,17 @@ class ChainReader(SaleDetection):
 
     # ---- Events ----
 
+    def _collection(self, contract: str) -> Collection | None:
+        for collection in self.reloader.current.collections:
+            if (
+                collection.chain == self.chain
+                and collection.contract_address == contract
+                and collection.is_active
+                and collection.track_onchain
+            ):
+                return collection
+        return None
+
     async def _store_block_events(self, block: Block, logs: list[dict[str, Any]]) -> None:
         by_contract: dict[str, list[TransferLog]] = defaultdict(list)
         for transfer in transfer_logs(logs):
