@@ -11,7 +11,7 @@ from datetime import UTC, datetime, timedelta
 
 from app.core.logging import get_logger
 from app.core.settings_reload import SettingsReloader
-from app.core.store import Collection, EventKind, PostStatus, Store, StoredListing
+from app.core.store import Collection, EventKind, PostStatus, Store
 from app.discord.listing_groups import ListingGroups, group_is_due
 from app.discord.nft_poster import MAX_EMBEDS_PER_MESSAGE, NFTPoster
 from app.nft.models import (
@@ -227,13 +227,24 @@ class EventPublisher:
             lambda: self.groups.post(collection, pending),
         )
 
-    async def close_listings(self, collection: Collection, closing: list[StoredListing]) -> None:
-        """Mark listings no longer live (cancelled, expired or sold) and delete or edit their posts."""
-        await self.groups.close(collection, closing)
+    async def release_listings(
+        self, collection: Collection, entries: list[tuple[int, NFTListingEvent]]
+    ) -> None:
+        """Post pending listings: each at once when the window is 0, else the collection's due group."""
+        if not collection.listing_group_minutes:
+            for event_id, event in entries:
+                await self.post_listing(collection, event_id, event)
+            return
+        pending = [
+            entry
+            for entry in await self.store.list_pending_listings()
+            if entry[1].collection_id == collection.id
+        ]
+        await self.post_due_listings(collection, pending)
 
     async def settle_sale(self, collection: Collection, sale: NFTSaleEvent) -> None:
         """A sale was recorded: close the seller's live listings of that token now, not at the next poll."""
-        await self.close_listings(
+        await self.groups.close(
             collection,
             [
                 stored
@@ -310,11 +321,7 @@ class EventPublisher:
             collection = self._collection(collection_id, "listing")
             if collection is None:
                 continue
-            if collection.listing_group_minutes:
-                await self.post_due_listings(collection, entries)
-                continue
-            for event_id, listing in entries:
-                await self.post_listing(collection, event_id, listing)
+            await self.release_listings(collection, entries)
 
     async def _expire(self, kind: EventKind, event_id: int, token_id: str) -> None:
         await self.store.set_post_status(kind, event_id, PostStatus.EXPIRED)

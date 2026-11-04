@@ -4,6 +4,7 @@ Every test runs against the in-memory store and, when TEST_DATABASE_URL is set,
 against a migrated throwaway Postgres, so the stand-in can't drift from the schema.
 """
 
+from dataclasses import replace
 from datetime import UTC, datetime
 from decimal import Decimal
 
@@ -290,3 +291,12 @@ async def test_collection_listing_group_minutes_round_trips(
     store, cid = store_with_collection
     [collection] = [c for c in await store.list_collections() if c.id == cid]
     assert collection.listing_group_minutes == 15
+    if isinstance(store, MemoryStore):
+        store.update_collection(replace(collection, listing_group_minutes=30))
+    else:
+        assert isinstance(store, DatabaseClient) and store.pool is not None
+        await store.pool.execute(
+            "UPDATE nft_collections SET listing_group_minutes = 30 WHERE id = $1", cid
+        )
+    [collection] = [c for c in await store.list_collections() if c.id == cid]
+    assert collection.listing_group_minutes == 30

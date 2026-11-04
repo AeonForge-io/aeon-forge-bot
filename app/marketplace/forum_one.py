@@ -166,22 +166,13 @@ class ForumOnePoller:
             for stored in await self.store.list_active_listings(collection.id, MARKETPLACE)
             if stored.event.listing_id not in live_hashes
         ]
-        await self.publisher.close_listings(collection, vanished)
+        await self.publisher.groups.close(collection, vanished)
 
     async def _post_new(
         self, collection: Collection, new: list[tuple[int, NFTListingEvent]]
     ) -> None:
         """Post new listings at once, or when the collection holds them, the ones now due."""
-        if not collection.listing_group_minutes:
-            for event_id, event in new:
-                await self.publisher.post_listing(collection, event_id, event)
-            return
-        pending = [
-            entry
-            for entry in await self.store.list_pending_listings()
-            if entry[1].collection_id == collection.id
-        ]
-        await self.publisher.post_due_listings(collection, pending)
+        await self.publisher.release_listings(collection, new)
 
     async def _fetch_all(self, collection: Collection) -> list[ForumOneListing]:
         listings: list[ForumOneListing] = []

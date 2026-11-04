@@ -168,3 +168,11 @@ async def test_a_failed_edit_leaves_the_listings_active_and_the_next_poll_edits_
 async def test_window_zero_posts_each_listing_at_once(poller: Poller) -> None:
     await _held(poller, 3, minutes=0)
     assert len(poller.discord.messages(MAIN_CHANNEL)) == 3
+
+
+async def test_a_held_listing_past_six_hours_is_not_posted_in_the_group(poller: Poller) -> None:
+    await _held(poller, 2, minutes=360)
+    poller.clock.current = NOW + timedelta(hours=6, seconds=1)
+    await poller.poller.poll_once()
+    assert poller.discord.sent == {}
+    assert poller.statuses() == [PostStatus.PENDING] * 2
