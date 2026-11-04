@@ -11,7 +11,8 @@ from datetime import UTC, datetime, timedelta
 
 from app.core.logging import get_logger
 from app.core.settings_reload import SettingsReloader
-from app.core.store import Collection, EventKind, PostStatus, Store, StoredListing
+from app.core.store import Collection, EventKind, PostStatus, Store
+from app.discord.listing_groups import ListingGroups, group_is_due
 from app.discord.nft_poster import MAX_EMBEDS_PER_MESSAGE, NFTPoster
 from app.nft.models import (
     NFTBurnEvent,
@@ -44,6 +45,7 @@ class EventPublisher:
         self.poster = poster
         self.wallet_names = wallet_names
         self.clock = clock
+        self.groups = ListingGroups(store, poster, wallet_names)
         # Events whose post is under way in this process; retry_pending leaves them alone.
         self._in_flight: set[tuple[EventKind, int]] = set()
 
@@ -201,35 +203,57 @@ class EventPublisher:
 
         await self._guarded(EventKind.LISTING, [event_id], work)
 
-    async def close_listing(self, collection: Collection, stored: StoredListing) -> None:
-        """Mark a listing no longer live (cancelled, expired or sold) and delete its post.
+    async def post_due_listings(
+        self, collection: Collection, pending: list[tuple[int, NFTListingEvent]]
+    ) -> None:
+        """Post a collection's held listings once the oldest has waited out its window.
 
-        A listing never posted has no message, so only its flags change. A failed Discord
-        call is logged and leaves the listing active for the next try.
+        One listing posts as the single card, two or more as one grouped post.
         """
-        if stored.message_id is not None and stored.channel_id is not None:
-            try:
-                await self.poster.delete_message(stored.channel_id, stored.message_id)
-            except DiscordAPIError as e:
-                logger.error(
-                    "post.listing.close_failed",
-                    collection=collection.collection_id,
-                    listing_id=stored.event.listing_id,
-                    error=str(e),
-                )
-                return
-        if stored.status is PostStatus.PENDING:
-            # never posted: the retry must not post a listing that is gone
-            await self.store.set_post_status(EventKind.LISTING, stored.id, PostStatus.SKIPPED)
-        await self.store.set_listing_inactive(stored.id)
+        oldest = self.clock() - EXPIRY_AFTER
+        pending = [
+            (event_id, event)
+            for event_id, event in pending
+            if not self._busy(EventKind.LISTING, event_id) and event.event_timestamp >= oldest
+        ]
+        if not group_is_due(collection, pending, self.clock()):
+            return
+        if len(pending) == 1:
+            await self.post_listing(collection, *pending[0])
+            return
+        await self._guarded(
+            EventKind.LISTING,
+            [event_id for event_id, _ in pending],
+            lambda: self.groups.post(collection, pending),
+        )
+
+    async def release_listings(
+        self, collection: Collection, entries: list[tuple[int, NFTListingEvent]]
+    ) -> None:
+        """Post pending listings: each at once when the window is 0, else the collection's due group."""
+        if not collection.listing_group_minutes:
+            for event_id, event in entries:
+                await self.post_listing(collection, event_id, event)
+            return
+        pending = [
+            entry
+            for entry in await self.store.list_pending_listings()
+            if entry[1].collection_id == collection.id
+        ]
+        await self.post_due_listings(collection, pending)
 
     async def settle_sale(self, collection: Collection, sale: NFTSaleEvent) -> None:
         """A sale was recorded: close the seller's live listings of that token now, not at the next poll."""
-        for stored in await self.store.list_active_listings_of_token(
-            sale.collection_id, sale.token_id, sale.seller_address
-        ):
-            if stored.event.event_timestamp <= sale.event_timestamp:
-                await self.close_listing(collection, stored)
+        await self.groups.close(
+            collection,
+            [
+                stored
+                for stored in await self.store.list_active_listings_of_token(
+                    sale.collection_id, sale.token_id, sale.seller_address
+                )
+                if stored.event.event_timestamp <= sale.event_timestamp
+            ],
+        )
 
     async def retry_pending(self) -> None:
         """Expire pending events past 6 hours, post the rest again."""
@@ -279,13 +303,25 @@ class EventPublisher:
             elif (collection := self._collection(sale.collection_id, "sale")) is not None:
                 await self.post_sale(collection, event_id, sale)
 
+        await self._retry_listings(listings, oldest)
+
+    async def _retry_listings(
+        self, listings: list[tuple[int, NFTListingEvent]], oldest: datetime
+    ) -> None:
+        """Expire pending listings past 6 hours; post the rest singly, or grouped by window."""
+        held: dict[int, list[tuple[int, NFTListingEvent]]] = defaultdict(list)
         for event_id, listing in listings:
             if self._busy(EventKind.LISTING, event_id):
                 continue
             if listing.event_timestamp < oldest:
                 await self._expire(EventKind.LISTING, event_id, listing.token_id)
-            elif (collection := self._collection(listing.collection_id, "listing")) is not None:
-                await self.post_listing(collection, event_id, listing)
+            else:
+                held[listing.collection_id].append((event_id, listing))
+        for collection_id, entries in held.items():
+            collection = self._collection(collection_id, "listing")
+            if collection is None:
+                continue
+            await self.release_listings(collection, entries)
 
     async def _expire(self, kind: EventKind, event_id: int, token_id: str) -> None:
         await self.store.set_post_status(kind, event_id, PostStatus.EXPIRED)

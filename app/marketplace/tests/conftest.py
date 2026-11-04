@@ -93,6 +93,7 @@ def le_collection(**overrides: Any) -> Collection:
         "track_marketplace": True,
         "marketplaces": ("forum_one",),
         "image_url_template": TEMPLATE_URL,
+        "listing_group_minutes": 0,  # listings post at once unless a test sets a window
     }
     return Collection(**{**values, **overrides})
 

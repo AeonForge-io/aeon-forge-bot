@@ -1,8 +1,9 @@
 """The cards each post type builds: image, token id, links and buttons."""
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
+from app.discord.listing_group_card import create_listing_group_card
 from app.discord.nft_embeds import (
     create_burn_card,
     create_listing_card,
@@ -337,3 +338,62 @@ async def test_listing_card_with_nothing_safe_in_the_symbol_says_tokens() -> Non
     card = Card(create_listing_card(event, "DragonZ", "base", CONTRACT))
 
     assert card.values("Price") == ["1 tokens"]
+
+
+def _group_event(n: int, **overrides: object) -> NFTListingEvent:
+    values: dict[str, object] = {
+        "collection_id": 1,
+        "token_id": str(n),
+        "token_name": f"Dragon #{n}",
+        "token_image_url": f"https://images.test/{n}.jpg",
+        "seller_address": ADDRESS,
+        "marketplace": "forum_one",
+        "price_native": Decimal("0.02"),
+        "currency": "ETH",
+        "listing_id": f"0x{n}",
+        "event_timestamp": NOW + timedelta(minutes=n),
+    }
+    return NFTListingEvent(**{**values, **overrides})
+
+
+async def test_group_card_counts_listings_and_lists_rows_oldest_first_with_links_and_thumbnails() -> (
+    None
+):
+    events = [_group_event(3), _group_event(1), _group_event(2, token_image_url=None)]
+    card = Card(create_listing_group_card(events, "DragonZ", "base", CONTRACT))
+
+    assert card.accent == LISTING_COLOR
+    assert "## 3 new listings: DragonZ" in card.text
+    rows = [line for line in card.text.splitlines() if line.startswith("[Dragon")]
+    assert [row.split("]")[0] for row in rows] == ["[Dragon #1", "[Dragon #2", "[Dragon #3"]
+    assert f"(https://forumone.io/token/8453/{CONTRACT}/1)" in rows[0]
+    assert card.thumbnails == ["https://images.test/1.jpg", "https://images.test/3.jpg"]
+    assert "0.02 ETH · 0xabcd...ef12" in card.text
+    assert card.buttons == [("Browse Forum One", BROWSE_URL)]
+
+
+async def test_group_card_shows_ten_rows_and_counts_the_rest() -> None:
+    card = Card(
+        create_listing_group_card([_group_event(n) for n in range(25)], "DragonZ", "base", CONTRACT)
+    )
+    assert "## 25 new listings: DragonZ" in card.text
+    assert len(card.thumbnails) == 10
+    assert "[Dragon #9]" in card.text
+    assert "[Dragon #10]" not in card.text
+    assert "and 15 more listed" in card.text
+
+
+async def test_group_card_with_one_live_listing_keeps_the_grouped_look() -> None:
+    card = Card(create_listing_group_card([_group_event(4)], "DragonZ", "base", CONTRACT))
+    assert "## 1 new listing: DragonZ" in card.text
+    assert len(card.thumbnails) == 1
+
+
+async def test_group_card_with_long_names_stays_within_discords_limits() -> None:
+    events = [
+        _group_event(n, token_name="N" * 500, seller_address=ADDRESS, currency="C" * 100)
+        for n in range(10)
+    ]
+    view = create_listing_group_card(events, "C" * 100, "base", CONTRACT, {ADDRESS: "w" * 300})
+    assert len(list(view.walk_children())) <= 40
+    assert len(Card(view).text) <= 4000

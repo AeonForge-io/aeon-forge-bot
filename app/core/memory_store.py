@@ -196,6 +196,18 @@ class MemoryStore:
             and listing.event.seller_address == seller_address
         ]
 
+    async def list_active_listings_of_message(
+        self, channel_id: int, message_id: int
+    ) -> list[StoredListing]:
+        return sorted(
+            (
+                listing
+                for listing in self._active_listings()
+                if (listing.channel_id, listing.message_id) == (channel_id, message_id)
+            ),
+            key=lambda listing: (listing.event.event_timestamp, listing.id),
+        )
+
     async def set_listing_inactive(self, event_id: int) -> None:
         for stored in self.events[EventKind.LISTING]:
             if stored.id == event_id:

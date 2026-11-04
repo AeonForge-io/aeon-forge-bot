@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 import discord
 
 from app.core.logging import get_logger
+from app.discord.listing_group_card import create_listing_group_card
 from app.discord.nft_embeds import (
     NO_NAMES,
     create_burn_card,
@@ -246,6 +247,67 @@ class NFTPoster:
                 exc_info=True,
             )
             raise DiscordAPIError(f"Failed to post listing: {e}") from e
+
+    async def post_listing_group(
+        self,
+        live: list[NFTListingEvent],
+        collection_name: str,
+        channel_id: int,
+        chain: str,
+        contract_address: str,
+        names: Mapping[str, str] = NO_NAMES,
+    ) -> int:
+        """Post the grouped listings card and return the id of the sent message."""
+        try:
+            channel = await self._get_channel(channel_id)
+            message = await channel.send(
+                view=create_listing_group_card(
+                    live, collection_name, chain, contract_address, names
+                ),
+                allowed_mentions=NO_MENTIONS,
+            )
+            return message.id
+        except DiscordAPIError:
+            raise
+        except Exception as e:
+            logger.error(
+                "nft.post.listing_group.failed",
+                collection=collection_name,
+                listings=len(live),
+                error=str(e),
+                exc_info=True,
+            )
+            raise DiscordAPIError(f"Failed to post grouped listings: {e}") from e
+
+    async def edit_listing_group(
+        self,
+        channel_id: int,
+        message_id: int,
+        live: list[NFTListingEvent],
+        collection_name: str,
+        chain: str,
+        contract_address: str,
+        names: Mapping[str, str] = NO_NAMES,
+    ) -> None:
+        """Draw a grouped listings post again from the listings still live."""
+        try:
+            channel = await self._get_channel(channel_id)
+            await channel.get_partial_message(message_id).edit(
+                view=create_listing_group_card(
+                    live, collection_name, chain, contract_address, names
+                )
+            )
+        except DiscordAPIError:
+            raise
+        except Exception as e:
+            logger.error(
+                "nft.edit.listing_group.failed",
+                channel_id=channel_id,
+                message_id=message_id,
+                error=str(e),
+                exc_info=True,
+            )
+            raise DiscordAPIError(f"Failed to edit grouped listings: {e}") from e
 
     async def delete_message(self, channel_id: int, message_id: int) -> None:
         """Delete a posted message; one already gone counts as deleted."""
