@@ -10,6 +10,8 @@ def _walk(item: Any) -> Iterator[Any]:
     yield item
     for child in getattr(item, "children", []):
         yield from _walk(child)
+    if (accessory := getattr(item, "accessory", None)) is not None:
+        yield from _walk(accessory)
 
 
 class Card:
@@ -35,6 +37,10 @@ class Card:
             if isinstance(i, ui.MediaGallery)
             for gallery_item in i.items
         ]
+
+    @property
+    def thumbnails(self) -> list[str]:
+        return [i.media.url for i in self.items if isinstance(i, ui.Thumbnail)]
 
     @property
     def buttons(self) -> list[tuple[str, str | None]]:

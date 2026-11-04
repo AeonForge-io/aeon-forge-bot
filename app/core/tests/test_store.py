@@ -262,3 +262,31 @@ async def test_pending_events_are_listed_oldest_first_and_only_while_pending(
     assert [(i, x.listing_id) for i, x in await store.list_pending_listings()] == [
         (pending_listing_id, "0xp")
     ]
+
+
+async def test_active_listings_of_a_message_are_those_sharing_it_and_still_live(
+    store_with_collection: tuple[Store, int],
+) -> None:
+    store, cid = store_with_collection
+    ids = [
+        await store.insert_listing(listing(cid, f"0xm{n}"), PostStatus.PENDING) for n in range(3)
+    ]
+    assert all(i is not None for i in ids)
+    for event_id in ids[:2]:
+        assert event_id is not None
+        await store.set_listing_message(event_id, 55, 66)
+    assert ids[2] is not None
+    await store.set_listing_message(ids[2], 55, 67)
+    assert ids[0] is not None
+    await store.set_listing_inactive(ids[0])
+
+    assert [s.id for s in await store.list_active_listings_of_message(55, 66)] == [ids[1]]
+    assert await store.list_active_listings_of_message(55, 99) == []
+
+
+async def test_collection_listing_group_minutes_round_trips(
+    store_with_collection: tuple[Store, int],
+) -> None:
+    store, cid = store_with_collection
+    [collection] = [c for c in await store.list_collections() if c.id == cid]
+    assert collection.listing_group_minutes == 15

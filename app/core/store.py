@@ -58,6 +58,7 @@ class Collection:
     post_burns: bool = True
     post_sales: bool = True
     post_listings: bool = True
+    listing_group_minutes: int = 15  # how long new listings are held to post as one; 0 = at once
     transfer_mode: TransferMode = "company"
     image_url_template: str | None = None  # "{token_id}" is replaced by the token id
     mint_url: str | None = None  # Where to mint; None gives mint posts no "Mint yours" button
@@ -162,6 +163,10 @@ class Store(Protocol):
 
     async def list_active_listings_of_token(
         self, collection_id: int, token_id: str, seller_address: str
+    ) -> list[StoredListing]: ...
+
+    async def list_active_listings_of_message(
+        self, channel_id: int, message_id: int
     ) -> list[StoredListing]: ...
 
     async def set_listing_inactive(self, event_id: int) -> None: ...

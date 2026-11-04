@@ -123,6 +123,7 @@ class DatabaseClient:
                 post_burns=row["post_burns"],
                 post_sales=row["post_sales"],
                 post_listings=row["post_listings"],
+                listing_group_minutes=row["listing_group_minutes"],
                 transfer_mode=row["transfer_mode"],
                 image_url_template=row["image_url_template"],
                 mint_url=row["mint_url"],
@@ -403,6 +404,23 @@ class DatabaseClient:
                 collection_id,
                 token_id,
                 seller_address,
+            ),
+        )
+        return [self._stored_listing(r) for r in rows]
+
+    async def list_active_listings_of_message(
+        self, channel_id: int, message_id: int
+    ) -> list[StoredListing]:
+        rows = await self._run(
+            "list_active_listings_of_message",
+            lambda conn: conn.fetch(
+                """
+                SELECT * FROM nft_listings
+                WHERE discord_channel_id = $1 AND discord_message_id = $2 AND is_active
+                ORDER BY event_timestamp, id
+                """,
+                channel_id,
+                message_id,
             ),
         )
         return [self._stored_listing(r) for r in rows]

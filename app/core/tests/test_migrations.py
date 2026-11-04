@@ -141,3 +141,25 @@ async def test_schema_refuses_bad_settings_rows(pg_client: DatabaseClient) -> No
                 "INSERT INTO marketplace_marks (kind, value, marketplace) "
                 "VALUES ('calldata_tag', '0x360c6ebe', 'Someone')"
             )
+
+
+@pytest.mark.integration
+async def test_listing_group_minutes_defaults_to_15_and_refuses_out_of_range(
+    pg_client: DatabaseClient,
+) -> None:
+    assert {c.listing_group_minutes for c in await pg_client.list_collections()} == {15}
+    assert pg_client.pool is not None
+    async with pg_client.pool.acquire() as conn:
+        for minutes in (0, 360):
+            await conn.execute(
+                "UPDATE nft_collections SET listing_group_minutes = $1 "
+                "WHERE collection_id = 'sepolia-test'",
+                minutes,
+            )
+        for minutes in (361, -1):
+            with pytest.raises(asyncpg.CheckViolationError):
+                await conn.execute(
+                    "UPDATE nft_collections SET listing_group_minutes = $1 "
+                    "WHERE collection_id = 'sepolia-test'",
+                    minutes,
+                )

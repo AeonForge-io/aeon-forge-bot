@@ -2,8 +2,9 @@
 
 The first successful poll of a collection stores every live listing as skipped and sets
 the baseline; later polls insert new orderHashes and post them. A posted listing that vanishes from
-the feed was cancelled, expired or sold, so its message is deleted (a recorded sale deletes it
-at once, before the next poll).
+the feed was cancelled, expired or sold, so its post is deleted, or for a grouped post edited (a
+recorded sale does so at once, before the next poll). A collection with listing_group_minutes above 0
+holds new listings and posts them as one post once the oldest has waited out the window.
 """
 
 import asyncio
@@ -143,6 +144,7 @@ class ForumOnePoller:
             PostStatus.PENDING if has_baseline and collection.post_listings else PostStatus.SKIPPED
         )
         stale_before = self.publisher.clock() - EXPIRY_AFTER
+        new: list[tuple[int, NFTListingEvent]] = []
         for listing in live:
             event = self._event(collection, listing)
             listing_status = status
@@ -150,17 +152,36 @@ class ForumOnePoller:
                 listing_status = PostStatus.SKIPPED  # no backlog older than 6 hours
             event_id = await self.store.insert_listing(event, listing_status)
             if event_id is not None and listing_status is PostStatus.PENDING:
-                await self.publisher.post_listing(collection, event_id, event)
+                new.append((event_id, event))
         if not has_baseline:
             await self.store.mark_marketplace_polled(collection.id, MARKETPLACE)
+        # first, so a held listing the feed already lost is never posted
         await self._close_vanished(collection, {listing.orderHash for listing in live})
+        await self._post_new(collection, new)
 
     async def _close_vanished(self, collection: Collection, live_hashes: set[str]) -> None:
         """Close the stored listings the feed no longer shows (called only after a good fetch)."""
-        for stored in await self.store.list_active_listings(collection.id, MARKETPLACE):
-            if stored.event.listing_id in live_hashes:
-                continue
-            await self.publisher.close_listing(collection, stored)
+        vanished = [
+            stored
+            for stored in await self.store.list_active_listings(collection.id, MARKETPLACE)
+            if stored.event.listing_id not in live_hashes
+        ]
+        await self.publisher.close_listings(collection, vanished)
+
+    async def _post_new(
+        self, collection: Collection, new: list[tuple[int, NFTListingEvent]]
+    ) -> None:
+        """Post new listings at once, or when the collection holds them, the ones now due."""
+        if not collection.listing_group_minutes:
+            for event_id, event in new:
+                await self.publisher.post_listing(collection, event_id, event)
+            return
+        pending = [
+            entry
+            for entry in await self.store.list_pending_listings()
+            if entry[1].collection_id == collection.id
+        ]
+        await self.publisher.post_due_listings(collection, pending)
 
     async def _fetch_all(self, collection: Collection) -> list[ForumOneListing]:
         listings: list[ForumOneListing] = []
